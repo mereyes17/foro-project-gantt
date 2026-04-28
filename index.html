@@ -190,17 +190,16 @@ html, body { font-family: var(--font); background: var(--white); color: var(--ch
 .legend-dep-line { display: inline-block; width: 20px; height: 2px; border-top: 1.5px dashed #C4A0AD; vertical-align: middle; flex-shrink: 0; }
 
 /* ── DRAG TO REORDER ── */
-.col-drag { min-width: 20px; width: 20px; padding: 0 !important; cursor: grab; text-align: center; }
-.col-drag:active { cursor: grabbing; }
+.col-drag { min-width: 22px; width: 22px; padding: 0 2px !important; cursor: default; text-align: center; }
 .drag-handle {
-  display: inline-block; color: #CCC; font-size: 13px; line-height: 1;
-  padding: 4px 3px; cursor: grab; user-select: none; vertical-align: middle;
+  display: inline-block; color: #CCC; font-size: 14px; line-height: 1;
+  padding: 6px 2px; cursor: grab; user-select: none; vertical-align: middle;
   transition: color 0.12s;
 }
 .drag-handle:hover { color: var(--rose); }
-tr.drag-over-above { box-shadow: 0 -2px 0 0 var(--rose); }
-tr.drag-over-below { box-shadow: 0 2px 0 0 var(--rose); }
-tr.dragging { opacity: 0.38; background: var(--row-hover) !important; }
+tr.drag-over-above td { border-top: 2px solid var(--rose) !important; }
+tr.drag-over-below td { border-bottom: 2px solid var(--rose) !important; }
+tr.dragging { opacity: 0.35; }
 
 /* ── TEXT WRAP — task name cell grows with content ── */
 .task-name-wrap {
@@ -820,26 +819,59 @@ function addSubtask(pid) {
   const tasks=getTasks(); const p=tasks.find(t=>t.id===pid); if(!p) return;
   tasks.push({id:uid(),name:'New Subtask',cat:p.cat,who:p.who||'',s:p.s,e:p.e,pid});
   collapsed[pid]=false;
+  syncParentDates(tasks, pid);
   setTasks(tasks); saveCollapsed(); render();
 }
 function deleteTask(id) {
-  setTasks(getTasks().filter(t=>t.id!==id&&t.pid!==id)); render();
+  const tasks = getTasks();
+  const dying = tasks.find(t => t.id === id);
+  const parentId = dying?.pid || null;
+  const remaining = tasks.filter(t => t.id !== id && t.pid !== id);
+  // If a subtask was deleted, re-sync the parent dates from surviving siblings
+  if (parentId) syncParentDates(remaining, parentId);
+  setTasks(remaining); render();
 }
+
+/* ── Sync parent start/end to span all its subtasks ── */
+function syncParentDates(tasks, parentId) {
+  const kids = tasks.filter(t => t.pid === parentId && t.s && t.e);
+  if (!kids.length) return; // no subtasks left — leave parent alone
+  const parent = tasks.find(t => t.id === parentId); if (!parent) return;
+  const earliest = kids.reduce((min, k) => k.s < min ? k.s : min, kids[0].s);
+  const latest   = kids.reduce((max, k) => k.e > max ? k.e : max, kids[0].e);
+  parent.s = earliest;
+  parent.e = latest;
+}
+
 function updateField(id, field, val) {
-  const tasks=getTasks(); const t=tasks.find(x=>x.id===id); if(!t) return;
-  t[field]=val; setTasks(tasks);
-  if(field==='s'||field==='e') { renderHeader(); renderRows(); }
+  const tasks = getTasks();
+  const t = tasks.find(x => x.id === id); if (!t) return;
+  t[field] = val;
+  // If a subtask date changed, push update to parent
+  if ((field === 's' || field === 'e') && t.pid) {
+    syncParentDates(tasks, t.pid);
+  }
+  setTasks(tasks);
+  if (field === 's' || field === 'e') { renderHeader(); renderRows(); }
 }
+
 function updateDurationCalendar(id, n) {
-  const tasks=getTasks(); const t=tasks.find(x=>x.id===id); if(!t) return;
-  const days=parseInt(n); if(!days||days<1) return;
-  const start=parseDate(t.s); if(!start) return;
-  t.e=toISO(addDays(start,days-1)); setTasks(tasks); renderHeader(); renderRows();
+  const tasks = getTasks();
+  const t = tasks.find(x => x.id === id); if (!t) return;
+  const days = parseInt(n); if (!days || days < 1) return;
+  const start = parseDate(t.s); if (!start) return;
+  t.e = toISO(addDays(start, days - 1));
+  if (t.pid) syncParentDates(tasks, t.pid);
+  setTasks(tasks); renderHeader(); renderRows();
 }
+
 function updateDurationWorking(id, n) {
-  const tasks=getTasks(); const t=tasks.find(x=>x.id===id); if(!t) return;
-  const days=parseInt(n); if(!days||days<1) return;
-  t.e=endFromWorkingDays(t.s,days); setTasks(tasks); renderHeader(); renderRows();
+  const tasks = getTasks();
+  const t = tasks.find(x => x.id === id); if (!t) return;
+  const days = parseInt(n); if (!days || days < 1) return;
+  t.e = endFromWorkingDays(t.s, days);
+  if (t.pid) syncParentDates(tasks, t.pid);
+  setTasks(tasks); renderHeader(); renderRows();
 }
 function toggleCol(pid) {
   collapsed[pid]=!collapsed[pid]; saveCollapsed(); renderRows();
@@ -1544,107 +1576,127 @@ function autoGrow(el) {
 
 /* ════════════════════════════════════════════════════
    DRAG-TO-REORDER
+   Strategy:
+   - tr.draggable is FALSE by default
+   - mousedown on the handle sets it TRUE, so drag only
+     triggers when you grab the handle specifically
+   - mouseup anywhere resets it to FALSE
+   - dragover uses a counter to avoid flicker on child elements
    Rules:
-   - Parent rows: can be dragged to any parent position.
-     Moving a parent also moves all its children with it.
-   - Subtask rows: can only be reordered within the same parent.
+   - Parent drag moves the whole group (parent + subtasks)
+   - Subtask drag only reorders within its parent
 ════════════════════════════════════════════════════ */
 let dragId    = null;
 let dragIsSub = false;
 
+// Enable dragging only when handle is pressed
+document.addEventListener('mousedown', e => {
+  const handle = e.target.closest('.drag-handle');
+  if (handle) {
+    const tr = handle.closest('tr');
+    if (tr) tr.draggable = true;
+  }
+});
+document.addEventListener('mouseup', () => {
+  document.querySelectorAll('tr[draggable="true"]').forEach(tr => tr.draggable = false);
+});
+
 function addDragEvents(tr, taskId, isSub) {
-  tr.draggable = true;
+  tr.draggable = false; // only enabled on handle mousedown
 
   tr.addEventListener('dragstart', e => {
-    // Only start drag from handle
-    if (!e.target.classList.contains('drag-handle') && !e.target.closest('.drag-handle')) {
-      e.preventDefault(); return;
-    }
     dragId    = taskId;
     dragIsSub = isSub;
-    tr.classList.add('dragging');
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', taskId);
+    // Defer opacity so ghost image still shows full row
+    requestAnimationFrame(() => tr.classList.add('dragging'));
   });
 
   tr.addEventListener('dragend', () => {
+    tr.draggable = false;
     tr.classList.remove('dragging');
-    document.querySelectorAll('.drag-over-above,.drag-over-below').forEach(el=>{
-      el.classList.remove('drag-over-above','drag-over-below');
-    });
+    clearDropIndicators();
     dragId = null;
+  });
+
+  // Use counter to handle dragenter/dragleave on child elements
+  let enterCount = 0;
+
+  tr.addEventListener('dragenter', e => {
+    if (!dragId || dragId === taskId) return;
+    e.preventDefault();
+    enterCount++;
+    updateDropIndicator(tr, e.clientY);
   });
 
   tr.addEventListener('dragover', e => {
     if (!dragId || dragId === taskId) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-
-    const rect = tr.getBoundingClientRect();
-    const mid  = rect.top + rect.height / 2;
-    document.querySelectorAll('.drag-over-above,.drag-over-below').forEach(el=>{
-      el.classList.remove('drag-over-above','drag-over-below');
-    });
-    tr.classList.add(e.clientY < mid ? 'drag-over-above' : 'drag-over-below');
+    updateDropIndicator(tr, e.clientY);
   });
 
   tr.addEventListener('dragleave', () => {
-    tr.classList.remove('drag-over-above','drag-over-below');
+    enterCount--;
+    if (enterCount <= 0) {
+      enterCount = 0;
+      tr.classList.remove('drag-over-above', 'drag-over-below');
+    }
   });
 
   tr.addEventListener('drop', e => {
     e.preventDefault();
+    enterCount = 0;
+    clearDropIndicators();
     if (!dragId || dragId === taskId) return;
-    tr.classList.remove('drag-over-above','drag-over-below');
 
-    const tasks    = getTasks();
-    const srcTask  = tasks.find(t=>t.id===dragId);
-    const tgtTask  = tasks.find(t=>t.id===taskId);
+    const tasks   = getTasks();
+    const srcTask = tasks.find(t => t.id === dragId);
+    const tgtTask = tasks.find(t => t.id === taskId);
     if (!srcTask || !tgtTask) return;
 
-    const rect  = tr.getBoundingClientRect();
-    const above = e.clientY < rect.top + rect.height / 2;
+    const above = e.clientY < tr.getBoundingClientRect().top + tr.getBoundingClientRect().height / 2;
 
     if (!dragIsSub && !isSub) {
-      // ── Parent → Parent reorder ──
-      // Collect src group (parent + its children)
-      const srcChildren = tasks.filter(t=>t.pid===srcTask.id);
+      // ── Parent → Parent reorder (drags whole group) ──
+      const srcChildren = tasks.filter(t => t.pid === srcTask.id);
       const srcGroup    = [srcTask, ...srcChildren];
-      const srcIds      = new Set(srcGroup.map(t=>t.id));
-
-      // Remove src group from array
-      const without = tasks.filter(t=>!srcIds.has(t.id));
-
-      // Find target parent index in without
-      const tgtParentIdx = without.findIndex(t=>t.id===tgtTask.id);
-      if (tgtParentIdx === -1) return;
-
-      // If inserting below target, skip past target's children too
-      let insertAt = tgtParentIdx + (above ? 0 : 1);
+      const srcIds      = new Set(srcGroup.map(t => t.id));
+      const without     = tasks.filter(t => !srcIds.has(t.id));
+      let insertAt      = without.findIndex(t => t.id === tgtTask.id);
+      if (insertAt === -1) return;
       if (!above) {
-        // skip tgt's children
+        insertAt++; // after target
         while (insertAt < without.length && without[insertAt].pid === tgtTask.id) insertAt++;
       }
-
       without.splice(insertAt, 0, ...srcGroup);
       setTasks(without);
+      render();
 
     } else if (dragIsSub && isSub && srcTask.pid === tgtTask.pid) {
       // ── Subtask → Subtask within same parent ──
-      const srcIdx = tasks.findIndex(t=>t.id===srcTask.id);
-      const tgtIdx = tasks.findIndex(t=>t.id===tgtTask.id);
-      if (srcIdx === -1 || tgtIdx === -1) return;
-
-      const reordered = [...tasks];
-      reordered.splice(srcIdx, 1);
-      const newTgtIdx = reordered.findIndex(t=>t.id===tgtTask.id);
-      reordered.splice(above ? newTgtIdx : newTgtIdx+1, 0, srcTask);
-      setTasks(reordered);
-    } else {
-      return; // cross-parent subtask drag not supported
+      const arr    = [...tasks];
+      const srcIdx = arr.findIndex(t => t.id === srcTask.id);
+      arr.splice(srcIdx, 1);
+      const tgtIdx = arr.findIndex(t => t.id === tgtTask.id);
+      arr.splice(above ? tgtIdx : tgtIdx + 1, 0, srcTask);
+      setTasks(arr);
+      render();
     }
+  });
+}
 
-    render();
+function updateDropIndicator(tr, clientY) {
+  clearDropIndicators();
+  const rect = tr.getBoundingClientRect();
+  const above = clientY < rect.top + rect.height / 2;
+  tr.classList.add(above ? 'drag-over-above' : 'drag-over-below');
+}
+
+function clearDropIndicators() {
+  document.querySelectorAll('.drag-over-above, .drag-over-below').forEach(el => {
+    el.classList.remove('drag-over-above', 'drag-over-below');
   });
 }
 
