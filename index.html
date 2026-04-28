@@ -1,0 +1,1139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>LOPA Gantt – Foro Consulting Inc.</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --white: #FFFFFF; --canvas: #FBFBFA; --charcoal: #2F3437;
+  --secondary: #888; --rose: #C4A0AD;
+  --rose-bg: rgba(196,160,173,0.10); --rose-mid: rgba(196,160,173,0.22);
+  --border: #EAEAEA; --row-hover: #FBEAF0; --sub-bg: #FDFCFC;
+  --font: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+}
+html, body { font-family: var(--font); background: var(--white); color: var(--charcoal); font-size: 13px; min-height: 100vh; }
+#app { display: flex; flex-direction: column; min-height: 100vh; }
+
+/* ── TOP BAR ── */
+#topbar {
+  background: var(--canvas); border-bottom: 1px solid var(--border);
+  padding: 12px 24px; display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 8px; position: sticky; top: 0; z-index: 20;
+}
+#topbar .brand { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--secondary); white-space: nowrap; }
+#topbar .controls { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+
+/* ── BUTTONS ── */
+.btn {
+  font-family: var(--font); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+  border: 1px solid var(--border); background: var(--white); color: var(--charcoal);
+  padding: 6px 12px; border-radius: 4px; cursor: pointer; white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.btn:hover { background: var(--canvas); }
+.btn.primary { background: var(--rose); color: var(--white); border-color: var(--rose); }
+.btn.primary:hover { background: #b8909c; border-color: #b8909c; }
+.btn.danger { color: #9F2F2D; border-color: #FDEBEC; background: #FDEBEC; }
+.btn.danger:hover { background: #f5d5d5; }
+
+/* ── HOUSE TABS ── */
+#house-tabs-bar {
+  background: var(--canvas); border-bottom: 1px solid var(--border);
+  padding: 0 24px; display: flex; align-items: flex-end; gap: 2px;
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+}
+#house-tabs-bar::-webkit-scrollbar { height: 3px; }
+#house-tabs-bar::-webkit-scrollbar-thumb { background: var(--border); }
+
+.house-tab {
+  font-family: var(--font); font-size: 12px; letter-spacing: 0.04em;
+  padding: 9px 18px 8px; border: 1px solid transparent;
+  border-bottom: none; border-radius: 4px 4px 0 0;
+  cursor: pointer; white-space: nowrap; color: var(--secondary);
+  background: transparent; transition: background 0.12s, color 0.12s;
+  position: relative; top: 1px;
+}
+.house-tab:hover { background: var(--row-hover); color: var(--charcoal); }
+.house-tab.active {
+  background: var(--white); color: var(--charcoal); font-weight: 600;
+  border-color: var(--border); border-bottom-color: var(--white);
+}
+.house-tab-add {
+  font-family: var(--font); font-size: 16px; color: var(--secondary);
+  padding: 6px 12px 8px; background: none; border: none;
+  cursor: pointer; line-height: 1; position: relative; top: 1px;
+  transition: color 0.12s;
+}
+.house-tab-add:hover { color: var(--rose); }
+
+/* ── METADATA PANEL ── */
+#meta-panel {
+  background: var(--canvas); border-bottom: 1px solid var(--border);
+  padding: 14px 24px;
+  display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; gap: 14px; align-items: end;
+}
+.meta-field label {
+  display: block; font-size: 10px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--secondary); margin-bottom: 4px;
+}
+.meta-field input {
+  font-family: var(--font); font-size: 13px; color: var(--charcoal);
+  background: transparent; border: none; border-bottom: 1px solid var(--border);
+  width: 100%; padding: 2px 0; outline: none;
+}
+.meta-field input:focus { border-bottom-color: var(--rose); }
+.meta-field.rename-house { display: flex; flex-direction: column; }
+.rename-house input { font-weight: 600; }
+
+/* ── FILTER BAR ── */
+#filter-bar {
+  padding: 8px 24px; display: flex; align-items: center; gap: 12px;
+  border-bottom: 1px solid var(--border); flex-wrap: wrap; background: var(--white);
+}
+#filter-bar label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--secondary); }
+#filter-bar select {
+  font-family: var(--font); font-size: 12px; color: var(--charcoal);
+  border: 1px solid var(--border); background: var(--white);
+  border-radius: 4px; padding: 4px 10px; outline: none; cursor: pointer;
+}
+#filter-bar select:focus { border-color: var(--rose); }
+.filter-clear { font-size: 11px; color: var(--secondary); cursor: pointer; text-decoration: underline; }
+
+/* ── HOLIDAY LEGEND ── */
+#holiday-legend {
+  padding: 5px 24px; font-size: 10px; color: var(--secondary);
+  letter-spacing: 0.04em; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+}
+.legend-swatch {
+  display: inline-block; width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0;
+  background: repeating-linear-gradient(135deg,rgba(220,180,180,0.6) 0px,rgba(220,180,180,0.6) 2px,transparent 2px,transparent 5px);
+  border: 1px solid rgba(220,180,180,0.8); vertical-align: middle;
+}
+
+/* ── GANTT TABLE ── */
+#gantt-wrapper {
+  flex: 1; overflow-x: auto; overflow-y: visible;
+  padding: 0 24px 24px; -webkit-overflow-scrolling: touch;
+}
+#gantt-wrapper::-webkit-scrollbar { height: 6px; }
+#gantt-wrapper::-webkit-scrollbar-track { background: var(--canvas); }
+#gantt-wrapper::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+#gantt-table { width: 100%; min-width: 900px; border-collapse: collapse; }
+
+#gantt-table thead tr.col-header th {
+  background: var(--canvas); font-size: 10px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--secondary); font-weight: 500;
+  padding: 8px; border-bottom: 1px solid var(--border); white-space: nowrap; text-align: left;
+}
+
+.col-task     { min-width: 210px; width: 210px; position: sticky; left: 0; z-index: 4; }
+.col-category { min-width: 130px; width: 130px; }
+.col-assignee { min-width: 120px; width: 120px; }
+.col-start    { min-width: 98px; width: 98px; }
+.col-end      { min-width: 98px; width: 98px; }
+.col-dur      { min-width: 58px; width: 58px; text-align: right !important; }
+.col-del      { min-width: 32px; width: 32px; text-align: center !important; }
+.week-col     { min-width: 52px; width: 52px; text-align: center; border-left: 1px solid var(--border); }
+.week-col.current-week { background: rgba(196,160,173,0.08); }
+.week-col.holiday-week { background: rgba(220,180,180,0.09); }
+.week-col-label { font-size: 9px; letter-spacing: 0.04em; color: var(--secondary); }
+
+/* ── ROWS ── */
+#gantt-table tbody tr { border-bottom: 1px solid var(--border); transition: background 0.1s; }
+#gantt-table tbody tr:hover { background: var(--row-hover); }
+#gantt-table tbody td { padding: 6px 8px; vertical-align: middle; }
+.col-task-cell { background: var(--white); position: sticky; left: 0; z-index: 3; }
+#gantt-table tbody tr:hover .col-task-cell { background: var(--row-hover); }
+
+/* Parent rows */
+#gantt-table tbody tr.is-parent { background: #FAF5F7; border-left: 3px solid var(--rose); }
+#gantt-table tbody tr.is-parent td { font-weight: 700; font-size: 12.5px; }
+#gantt-table tbody tr.is-parent .col-task-cell { background: #FAF5F7; }
+#gantt-table tbody tr.is-parent:hover, #gantt-table tbody tr.is-parent:hover .col-task-cell { background: var(--row-hover); }
+#gantt-table tbody tr.is-parent .cell-input { font-weight: 700; font-size: 12.5px; }
+#gantt-table tbody tr.is-parent .dur-input  { font-weight: 800; font-size: 12px; color: var(--charcoal); }
+
+/* Subtask rows */
+#gantt-table tbody tr.is-subtask { background: var(--sub-bg); border-left: 3px solid transparent; }
+#gantt-table tbody tr.is-subtask .col-task-cell { background: var(--sub-bg); }
+#gantt-table tbody tr.is-subtask:hover, #gantt-table tbody tr.is-subtask:hover .col-task-cell { background: var(--row-hover); }
+#gantt-table tbody tr.is-subtask td { font-size: 12px; padding-top: 4px; padding-bottom: 4px; }
+#gantt-table tbody tr.is-subtask .dur-input { font-weight: 500; font-size: 11px; opacity: 0.8; }
+.subtask-indent { padding-left: 22px !important; }
+
+/* ── INPUTS ── */
+.cell-input {
+  font-family: var(--font); font-size: 12px; color: var(--charcoal);
+  background: transparent; border: 1px solid transparent;
+  border-radius: 3px; padding: 2px 4px; width: 100%; outline: none; transition: border-color 0.12s;
+}
+.cell-input:focus { border-color: var(--rose); background: var(--white); }
+.cell-input[type="date"] { font-size: 11px; }
+select.cell-input { cursor: pointer; }
+.dur-input {
+  font-family: var(--font); font-size: 11px; color: var(--rose); font-weight: 600;
+  text-align: right; background: transparent; border: 1px solid transparent;
+  border-radius: 3px; padding: 2px 4px; width: 100%; outline: none; transition: border-color 0.12s;
+}
+.dur-input:focus { border-color: var(--rose); background: var(--white); color: var(--charcoal); }
+.dur-input::-webkit-inner-spin-button, .dur-input::-webkit-outer-spin-button { opacity: 0.4; }
+
+/* ── TOGGLE / SUB BUTTONS ── */
+.toggle-btn {
+  background: none; border: none; cursor: pointer; color: var(--rose);
+  font-size: 10px; font-weight: 700; padding: 0 4px 0 0; line-height: 1;
+  vertical-align: middle; font-family: var(--font);
+}
+.add-sub-btn {
+  background: none; border: none; cursor: pointer; color: var(--secondary);
+  font-size: 9px; letter-spacing: 0.05em; padding: 0 0 0 4px; line-height: 1;
+  vertical-align: middle; font-family: var(--font); text-transform: uppercase; transition: color 0.12s;
+}
+.add-sub-btn:hover { color: var(--rose); }
+
+/* ── GANTT BAR ── */
+.gantt-bar-cell { padding: 0 !important; vertical-align: middle; }
+.gantt-bar-container { position: relative; height: 34px; }
+.gantt-bar-bg {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  height: 16px; border-radius: 4px;
+  background: var(--rose-bg); border: 1px solid var(--rose-mid); overflow: hidden;
+}
+.is-subtask .gantt-bar-bg { height: 10px; }
+.gantt-bar-fill { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border-radius: 3px; background: var(--rose); }
+.is-subtask .gantt-bar-fill { opacity: 0.5; }
+.gantt-bar-fill.parent-fill { opacity: 0.72; }
+.gantt-bar-label {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  left: calc(100% + 5px); font-size: 9px; color: var(--secondary); white-space: nowrap; pointer-events: none; z-index: 2;
+}
+.hol-stripe {
+  position: absolute; top: 0; bottom: 0; pointer-events: none; z-index: 1;
+  background: repeating-linear-gradient(135deg,rgba(220,180,180,0.30) 0px,rgba(220,180,180,0.30) 2px,transparent 2px,transparent 5px);
+}
+.today-line { position: absolute; top: 0; bottom: 0; border-left: 1.5px dashed var(--rose); z-index: 4; pointer-events: none; }
+
+/* ── MISC CONTROLS ── */
+.del-btn {
+  background: none; border: none; cursor: pointer; color: var(--secondary);
+  font-size: 15px; line-height: 1; padding: 2px 4px; border-radius: 3px; transition: color 0.12s, background 0.12s;
+}
+.del-btn:hover { color: #9F2F2D; background: #FDEBEC; }
+#add-row-area {
+  padding: 10px 24px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+}
+
+/* ── TEMPLATE COPY MODAL ── */
+#tmpl-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.18); z-index: 998; }
+#tmpl-overlay.open { display: block; }
+#tmpl-modal {
+  display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  background: var(--white); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 6px 32px rgba(0,0,0,0.10); width: 400px; z-index: 999; flex-direction: column;
+}
+#tmpl-modal.open { display: flex; }
+#tmpl-modal-header {
+  padding: 16px 20px 12px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+#tmpl-modal-header h3 { font-size: 13px; font-weight: 600; color: var(--charcoal); }
+.modal-close { background: none; border: none; cursor: pointer; font-size: 18px; color: var(--secondary); }
+.modal-close:hover { color: var(--charcoal); }
+#tmpl-modal-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+#tmpl-modal-body label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--secondary); }
+#tmpl-modal-body select, #tmpl-modal-body input[type="text"] {
+  font-family: var(--font); font-size: 13px; color: var(--charcoal);
+  border: 1px solid var(--border); border-radius: 4px; padding: 7px 10px;
+  width: 100%; outline: none; margin-top: 4px;
+}
+#tmpl-modal-body select:focus, #tmpl-modal-body input[type="text"]:focus { border-color: var(--rose); }
+#tmpl-modal-body .hint { font-size: 11px; color: var(--secondary); line-height: 1.5; }
+#tmpl-modal-footer { padding: 12px 20px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ── CATEGORY MANAGER MODAL ── */
+#cat-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.15); z-index: 999; }
+#cat-overlay.open { display: block; }
+#cat-manager {
+  display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  background: var(--white); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.08); width: 360px; max-height: 520px; z-index: 1000; flex-direction: column;
+}
+#cat-manager.open { display: flex; }
+#cat-manager-header {
+  padding: 16px 20px 12px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+#cat-manager-header h3 { font-size: 13px; font-weight: 600; color: var(--charcoal); }
+#cat-list { flex: 1; overflow-y: auto; padding: 8px 0; }
+.cat-row { display: flex; align-items: center; gap: 6px; padding: 5px 16px; transition: background 0.1s; }
+.cat-row:hover { background: var(--canvas); }
+.cat-row-name {
+  flex: 1; font-family: var(--font); font-size: 12px; color: var(--charcoal);
+  background: transparent; border: 1px solid transparent; border-radius: 3px; padding: 3px 6px; outline: none;
+}
+.cat-row-name:focus { border-color: var(--rose); background: var(--white); }
+.cat-del-btn {
+  background: none; border: none; cursor: pointer; color: var(--secondary);
+  font-size: 14px; line-height: 1; padding: 2px 4px; border-radius: 3px; flex-shrink: 0;
+}
+.cat-del-btn:hover { color: #9F2F2D; background: #FDEBEC; }
+#cat-add-area { padding: 10px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; align-items: center; }
+#cat-new-input {
+  flex: 1; font-family: var(--font); font-size: 12px; color: var(--charcoal);
+  border: 1px solid var(--border); border-radius: 4px; padding: 5px 10px; outline: none;
+}
+#cat-new-input:focus { border-color: var(--rose); }
+
+/* ── PRESENTATION MODE ── */
+body.present-mode #topbar .controls,
+body.present-mode #filter-bar,
+body.present-mode #add-row-area,
+body.present-mode .del-btn,
+body.present-mode .add-sub-btn,
+body.present-mode .toggle-btn,
+body.present-mode #cat-manager,
+body.present-mode #cat-overlay,
+body.present-mode #tmpl-modal,
+body.present-mode #tmpl-overlay,
+body.present-mode .cell-input { display: none !important; }
+body.present-mode #meta-panel input { border-bottom: none; pointer-events: none; }
+body.present-mode .dur-input { border: none; pointer-events: none; background: transparent; color: var(--rose); }
+body.present-mode #present-exit { display: inline-block !important; }
+body.present-mode .category-select { display: none !important; }
+body.present-mode .category-text { display: inline !important; }
+#present-exit { display: none; }
+.category-text { display: none; font-size: 12px; color: var(--charcoal); }
+
+/* ── PDF EXPORT MODE ── */
+body.pdf-export #topbar .controls,
+body.pdf-export #filter-bar,
+body.pdf-export #add-row-area,
+body.pdf-export .del-btn,
+body.pdf-export .add-sub-btn,
+body.pdf-export .toggle-btn,
+body.pdf-export #house-tabs-bar { display: none !important; }
+body.pdf-export .cell-input { border: none !important; background: transparent !important; pointer-events: none; }
+body.pdf-export .dur-input  { border: none !important; background: transparent !important; pointer-events: none; color: var(--rose); }
+body.pdf-export #pdf-header { display: block !important; }
+body.pdf-export #gantt-wrapper { padding: 0 12px 12px; }
+body.pdf-export .category-select { display: none !important; }
+body.pdf-export .category-text { display: inline !important; }
+
+/* ── PDF HEADER ── */
+#pdf-header {
+  display: none; padding: 20px 24px 12px; border-bottom: 2px solid var(--rose);
+}
+#pdf-header .pdf-title { font-size: 20px; font-weight: 600; color: var(--charcoal); margin-bottom: 4px; }
+#pdf-header .pdf-sub   { font-size: 11px; color: var(--secondary); }
+#pdf-header .pdf-foro  { font-size: 10px; color: var(--secondary); text-align: right; margin-top: 2px; letter-spacing: 0.06em; }
+
+/* ── TOAST ── */
+#toast {
+  position: fixed; bottom: 24px; right: 24px; background: var(--charcoal); color: var(--white);
+  font-size: 12px; letter-spacing: 0.04em; padding: 10px 18px; border-radius: 4px;
+  opacity: 0; pointer-events: none; transform: translateY(8px); transition: opacity 0.2s, transform 0.2s; z-index: 9999;
+}
+#toast.show { opacity: 1; transform: translateY(0); }
+
+@media (max-width: 768px) {
+  #meta-panel { grid-template-columns: 1fr 1fr; }
+  #topbar { flex-direction: column; align-items: flex-start; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- TOP BAR -->
+  <div id="topbar">
+    <div class="brand">Foro Consulting Inc. &mdash; LOPA Gantt</div>
+    <div class="controls">
+      <button class="btn primary" onclick="addTask()">+ Add Task</button>
+      <button class="btn" onclick="openTmplModal()">Copy Template</button>
+      <button class="btn" onclick="openCatManager()">Categories</button>
+      <button class="btn primary" onclick="enterPresentation()">Present</button>
+      <button class="btn" onclick="exportCSV()">Export CSV</button>
+      <button class="btn" onclick="exportPNG()">Export PNG</button>
+      <button class="btn" onclick="exportPDF()">Export PDF</button>
+    </div>
+    <button class="btn danger" id="present-exit" onclick="exitPresentation()">Exit Presentation</button>
+  </div>
+
+  <!-- HOUSE TABS -->
+  <div id="house-tabs-bar"></div>
+
+  <!-- PDF HEADER (hidden until export) -->
+  <div id="pdf-header">
+    <div class="pdf-title" id="pdf-title-text"></div>
+    <div class="pdf-sub"   id="pdf-sub-text"></div>
+    <div class="pdf-foro">Foro Consulting Inc.</div>
+  </div>
+
+  <!-- METADATA PANEL -->
+  <div id="meta-panel">
+    <div class="meta-field">
+      <label>Project / Unit Name</label>
+      <input type="text" id="meta-name" placeholder="e.g. LOPA House 2" oninput="saveMeta()" />
+    </div>
+    <div class="meta-field">
+      <label>Location</label>
+      <input type="text" id="meta-location" placeholder="Location" oninput="saveMeta()" />
+    </div>
+    <div class="meta-field">
+      <label>Owner</label>
+      <input type="text" id="meta-owner" placeholder="Owner name" oninput="saveMeta()" />
+    </div>
+    <div class="meta-field">
+      <label>Prepared By</label>
+      <input type="text" id="meta-by" placeholder="Name / Role" oninput="saveMeta()" />
+    </div>
+    <div class="meta-field">
+      <label>Report Date</label>
+      <input type="date" id="meta-date" oninput="saveMeta()" />
+    </div>
+  </div>
+
+  <!-- FILTER BAR -->
+  <div id="filter-bar">
+    <label>Filter:</label>
+    <select id="filter-category" onchange="applyFilter()">
+      <option value="">All Categories</option>
+    </select>
+    <span class="filter-clear" onclick="clearFilter()">Clear</span>
+  </div>
+
+  <!-- HOLIDAY LEGEND -->
+  <div id="holiday-legend">
+    <span class="legend-swatch"></span>
+    <span>Hatched = Sundays &amp; PH public holidays (excluded from subtask working day count)</span>
+  </div>
+
+  <!-- GANTT -->
+  <div id="gantt-wrapper">
+    <table id="gantt-table">
+      <thead><tr class="col-header" id="table-header"></tr></thead>
+      <tbody id="table-body"></tbody>
+    </table>
+  </div>
+
+  <!-- ADD ROW -->
+  <div id="add-row-area">
+    <button class="btn primary" onclick="addTask()">+ Add Task</button>
+    <span style="font-size:11px;color:var(--secondary)">Auto-saved per house. Main task Days = calendar span. Subtask Days = working days.</span>
+  </div>
+</div>
+
+<!-- TEMPLATE COPY MODAL -->
+<div id="tmpl-overlay" onclick="closeTmplModal()"></div>
+<div id="tmpl-modal">
+  <div id="tmpl-modal-header">
+    <h3>Copy Tasks from Another House</h3>
+    <button class="modal-close" onclick="closeTmplModal()">&times;</button>
+  </div>
+  <div id="tmpl-modal-body">
+    <div>
+      <label>Copy tasks FROM</label>
+      <select id="tmpl-source"></select>
+    </div>
+    <div>
+      <label>New start date for copied tasks</label>
+      <input type="date" id="tmpl-start-date" />
+    </div>
+    <p class="hint">This will REPLACE all tasks in the current house tab with a copy of the selected house, shifted to the new start date. Your current house data will be overwritten.</p>
+  </div>
+  <div id="tmpl-modal-footer">
+    <button class="btn" onclick="closeTmplModal()">Cancel</button>
+    <button class="btn primary" onclick="applyTemplate()">Copy &amp; Apply</button>
+  </div>
+</div>
+
+<!-- CATEGORY MANAGER MODAL -->
+<div id="cat-overlay" onclick="closeCatManager()"></div>
+<div id="cat-manager">
+  <div id="cat-manager-header">
+    <h3>Manage Categories</h3>
+    <button class="modal-close" onclick="closeCatManager()">&times;</button>
+  </div>
+  <div id="cat-list"></div>
+  <div id="cat-add-area">
+    <input id="cat-new-input" type="text" placeholder="New category name..." onkeydown="if(event.key==='Enter')addCategory()" />
+    <button class="btn primary" onclick="addCategory()">Add</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ════════════════════════════════════════════════════
+   PHILIPPINE HOLIDAYS
+════════════════════════════════════════════════════ */
+function buildPHHolidays(yr) {
+  const d = [
+    `${yr}-01-01`,`${yr}-02-25`,`${yr}-04-09`,`${yr}-05-01`,
+    `${yr}-06-12`,`${yr}-08-21`,`${yr}-11-01`,`${yr}-11-02`,
+    `${yr}-11-30`,`${yr}-12-08`,`${yr}-12-24`,`${yr}-12-25`,
+    `${yr}-12-30`,`${yr}-12-31`,
+  ];
+  // National Heroes Day = last Monday of August
+  const nhd = new Date(yr,7,31);
+  while(nhd.getDay()!==1) nhd.setDate(nhd.getDate()-1);
+  d.push(toISO(nhd));
+  const easter = {2024:['2024-03-29','2024-03-30'],2025:['2025-04-18','2025-04-19'],2026:['2026-04-03','2026-04-04'],2027:['2027-03-26','2027-03-27'],2028:['2028-04-14','2028-04-15']};
+  if(easter[yr]) d.push(...easter[yr]);
+  return d;
+}
+const CY = new Date().getFullYear();
+const PH_HOL = new Set([...buildPHHolidays(CY-1),...buildPHHolidays(CY),...buildPHHolidays(CY+1),...buildPHHolidays(CY+2)]);
+function isNonWorking(d) { return d.getDay()===0 || PH_HOL.has(toISO(d)); }
+function workingDays(s0, e0) {
+  const s=parseDate(s0),e=parseDate(e0); if(!s||!e||e<s) return 0;
+  let n=0,c=new Date(s); while(c<=e){if(!isNonWorking(c))n++; c.setDate(c.getDate()+1);} return n;
+}
+function endFromWorkingDays(startISO, n) {
+  if(!startISO||!n||n<1) return startISO;
+  const s=parseDate(startISO); if(!s) return startISO;
+  let counted=0,c=new Date(s);
+  while(counted<n){if(!isNonWorking(c))counted++; if(counted<n)c.setDate(c.getDate()+1);}
+  return toISO(c);
+}
+
+/* ════════════════════════════════════════════════════
+   DATE UTILS
+════════════════════════════════════════════════════ */
+function today()        { const d=new Date(); d.setHours(0,0,0,0); return d; }
+function addDays(b,n)   { const d=new Date(b); d.setDate(d.getDate()+n); return d; }
+function toISO(d)       { return d.toISOString().slice(0,10); }
+function parseDate(s)   { if(!s) return null; const d=new Date(s+'T00:00:00'); return isNaN(d)?null:d; }
+function diffDays(a,b)  { return Math.round((b-a)/86400000); }
+function weekStart(d)   { const c=new Date(d); c.setDate(c.getDate()-c.getDay()); c.setHours(0,0,0,0); return c; }
+function fmtShort(d)    { return d.toLocaleDateString('en-PH',{month:'short',day:'numeric'}); }
+function fmtFull(d)     { return d?d.toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}):''; }
+function esc(s)         { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escQ(s)        { return (s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function uid()          { return Math.random().toString(36).slice(2,8)+Date.now().toString(36); }
+function g(id)          { return document.getElementById(id); }
+
+/* ════════════════════════════════════════════════════
+   HOUSES STATE
+   Each house: { id, label, tasks[], meta{} }
+════════════════════════════════════════════════════ */
+const SK_HOUSES    = 'foro_lopa_houses';
+const SK_ACTIVE    = 'foro_lopa_active';
+const SK_CATS      = 'foro_lopa_cats';
+const SK_COLLAPSED = 'foro_lopa_collapsed';
+
+const DEFAULT_CATS = [
+  'Tile Works','Painting','Carpentry','Doors & Windows','Electrical',
+  'Plumbing','Waterproofing','Ceiling Works','Structural Repair',
+  'Landscaping','Snagging / Punchlist'
+];
+
+let houses    = [];   // array of house objects
+let activeHID = null; // id of current house
+let CATS      = [...DEFAULT_CATS];
+let collapsed = {};   // taskId -> bool
+let filterCat = '';
+
+/* ════════════════════════════════════════════════════
+   SAMPLE TASKS
+════════════════════════════════════════════════════ */
+function sampleTasks(offset=0) {
+  const t = addDays(today(), offset);
+  const p1=uid(),p2=uid(),p3=uid(),p4=uid(),p5=uid(),p6=uid(),p7=uid(),p8=uid();
+  return [
+    {id:p1, name:'Tile Works – Living and Dining', cat:'Tile Works',           who:'KS Team',              s:toISO(t),              e:toISO(addDays(t,14)), pid:null},
+    {id:uid(),name:'Floor tiles – living area',    cat:'Tile Works',           who:'KS Team',              s:toISO(t),              e:toISO(addDays(t,7)),  pid:p1},
+    {id:uid(),name:'Floor tiles – dining area',    cat:'Tile Works',           who:'KS Team',              s:toISO(addDays(t,8)),   e:toISO(addDays(t,14)), pid:p1},
+    {id:p2, name:'Painting – All Rooms',           cat:'Painting',             who:'Painting Subcon',      s:toISO(addDays(t,3)),   e:toISO(addDays(t,21)), pid:null},
+    {id:uid(),name:'Primer coat – bedrooms',       cat:'Painting',             who:'Painting Subcon',      s:toISO(addDays(t,3)),   e:toISO(addDays(t,10)), pid:p2},
+    {id:uid(),name:'Finish coat – all rooms',      cat:'Painting',             who:'Painting Subcon',      s:toISO(addDays(t,11)),  e:toISO(addDays(t,21)), pid:p2},
+    {id:p3, name:'Carpentry – Built-ins',          cat:'Carpentry',            who:'Carpenter',            s:toISO(addDays(t,7)),   e:toISO(addDays(t,28)), pid:null},
+    {id:p4, name:'Doors & Windows – Installation', cat:'Doors & Windows',      who:'Supplier Team',        s:toISO(addDays(t,5)),   e:toISO(addDays(t,18)), pid:null},
+    {id:p5, name:'Electrical – Fixtures & Outlets',cat:'Electrical',           who:'Electrician',          s:toISO(addDays(t,10)),  e:toISO(addDays(t,25)), pid:null},
+    {id:p6, name:'Waterproofing – Bathrooms',      cat:'Waterproofing',        who:'Waterproofing Subcon', s:toISO(addDays(t,-3)),  e:toISO(addDays(t,7)),  pid:null},
+    {id:p7, name:'Structural Repair – Balcony',    cat:'Structural Repair',    who:'Civil Team',           s:toISO(addDays(t,-5)),  e:toISO(addDays(t,10)), pid:null},
+    {id:uid(),name:'Slab patching – Unit 5',       cat:'Structural Repair',    who:'Civil Team',           s:toISO(addDays(t,-5)),  e:toISO(addDays(t,2)),  pid:p7},
+    {id:uid(),name:'Slab patching – Unit 6',       cat:'Structural Repair',    who:'Civil Team',           s:toISO(addDays(t,3)),   e:toISO(addDays(t,10)), pid:p7},
+    {id:p8, name:'Snagging / Punchlist',           cat:'Snagging / Punchlist', who:'PM',                   s:toISO(addDays(t,25)),  e:toISO(addDays(t,35)), pid:null},
+  ];
+}
+
+function defaultMeta(label) {
+  return { name:label, location:'LOPA Subdivision', owner:'', by:'Foro Consulting Inc.', date:toISO(today()) };
+}
+
+function makeHouse(label) {
+  return { id:uid(), label, tasks:sampleTasks(), meta:defaultMeta(label) };
+}
+
+/* ════════════════════════════════════════════════════
+   PERSISTENCE
+════════════════════════════════════════════════════ */
+function saveAll() {
+  localStorage.setItem(SK_HOUSES, JSON.stringify(houses));
+  localStorage.setItem(SK_ACTIVE, activeHID);
+}
+function saveCollapsed() { localStorage.setItem(SK_COLLAPSED, JSON.stringify(collapsed)); }
+function saveCats()      { localStorage.setItem(SK_CATS, JSON.stringify(CATS)); }
+
+function loadAll() {
+  const rh = localStorage.getItem(SK_HOUSES);
+  const ra = localStorage.getItem(SK_ACTIVE);
+  const rc = localStorage.getItem(SK_CATS);
+  const rcol = localStorage.getItem(SK_COLLAPSED);
+
+  if(rc)  { try { CATS=JSON.parse(rc); }      catch(e){} }
+  if(rcol){ try { collapsed=JSON.parse(rcol); } catch(e){} }
+
+  if(rh) {
+    try {
+      houses = JSON.parse(rh);
+      activeHID = ra && houses.find(h=>h.id===ra) ? ra : houses[0].id;
+      return;
+    } catch(e){}
+  }
+  // First time — create 8 houses
+  const labels = ['House 2 – Jim','House 3 – Tinay','House 4 – Rapa','House 5 – Jamike','House 6 – Joel','House 7 – Nine','House 8 – Whitey','House 9'];
+  houses = labels.map(l => makeHouse(l));
+  activeHID = houses[0].id;
+  saveAll();
+}
+
+/* ════════════════════════════════════════════════════
+   CURRENT HOUSE ACCESSORS
+════════════════════════════════════════════════════ */
+function activeHouse()  { return houses.find(h=>h.id===activeHID); }
+function getTasks()     { return activeHouse()?.tasks || []; }
+function setTasks(arr)  { activeHouse().tasks = arr; saveAll(); }
+function getMeta()      { return activeHouse()?.meta || {}; }
+
+/* ════════════════════════════════════════════════════
+   HOUSE TAB MANAGEMENT
+════════════════════════════════════════════════════ */
+function renderTabs() {
+  const bar = g('house-tabs-bar');
+  bar.innerHTML = '';
+  houses.forEach(h => {
+    const btn = document.createElement('button');
+    btn.className = 'house-tab' + (h.id===activeHID?' active':'');
+    btn.textContent = h.label;
+    btn.onclick = () => switchHouse(h.id);
+    bar.appendChild(btn);
+  });
+  // Add house button
+  const addBtn = document.createElement('button');
+  addBtn.className = 'house-tab-add';
+  addBtn.title = 'Add new house';
+  addBtn.textContent = '+';
+  addBtn.onclick = addHouse;
+  bar.appendChild(addBtn);
+}
+
+function switchHouse(hid) {
+  activeHID = hid;
+  filterCat = '';
+  g('filter-category').value = '';
+  localStorage.setItem(SK_ACTIVE, hid);
+  loadMetaIntoUI();
+  renderTabs();
+  render();
+}
+
+function addHouse() {
+  const label = `House ${houses.length + 2}`;
+  const h = makeHouse(label);
+  houses.push(h);
+  activeHID = h.id;
+  saveAll();
+  renderTabs();
+  loadMetaIntoUI();
+  render();
+  showToast('New house added. Rename it in the Unit Name field above.');
+}
+
+/* ════════════════════════════════════════════════════
+   META UI SYNC
+════════════════════════════════════════════════════ */
+function loadMetaIntoUI() {
+  const m = getMeta();
+  g('meta-name').value     = m.name     || '';
+  g('meta-location').value = m.location || '';
+  g('meta-owner').value    = m.owner    || '';
+  g('meta-by').value       = m.by       || '';
+  g('meta-date').value     = m.date     || toISO(today());
+}
+function saveMeta() {
+  const h = activeHouse(); if(!h) return;
+  h.meta = {
+    name:     g('meta-name').value,
+    location: g('meta-location').value,
+    owner:    g('meta-owner').value,
+    by:       g('meta-by').value,
+    date:     g('meta-date').value,
+  };
+  // Also update the tab label to match Unit Name
+  const nameVal = g('meta-name').value.trim();
+  if(nameVal) h.label = nameVal;
+  saveAll();
+  renderTabs();
+}
+
+/* ════════════════════════════════════════════════════
+   TASK HELPERS
+════════════════════════════════════════════════════ */
+function parents()      { return getTasks().filter(t=>!t.pid); }
+function children(pid)  { return getTasks().filter(t=>t.pid===pid); }
+
+function addTask() {
+  const t=today();
+  const tasks = getTasks();
+  tasks.push({id:uid(),name:'New Task',cat:CATS[0],who:'',s:toISO(t),e:toISO(addDays(t,7)),pid:null});
+  setTasks(tasks); render();
+}
+function addSubtask(pid) {
+  const tasks=getTasks(); const p=tasks.find(t=>t.id===pid); if(!p) return;
+  tasks.push({id:uid(),name:'New Subtask',cat:p.cat,who:p.who||'',s:p.s,e:p.e,pid});
+  collapsed[pid]=false;
+  setTasks(tasks); saveCollapsed(); render();
+}
+function deleteTask(id) {
+  setTasks(getTasks().filter(t=>t.id!==id&&t.pid!==id)); render();
+}
+function updateField(id, field, val) {
+  const tasks=getTasks(); const t=tasks.find(x=>x.id===id); if(!t) return;
+  t[field]=val; setTasks(tasks);
+  if(field==='s'||field==='e') { renderHeader(); renderRows(); }
+}
+function updateDurationCalendar(id, n) {
+  const tasks=getTasks(); const t=tasks.find(x=>x.id===id); if(!t) return;
+  const days=parseInt(n); if(!days||days<1) return;
+  const start=parseDate(t.s); if(!start) return;
+  t.e=toISO(addDays(start,days-1)); setTasks(tasks); renderHeader(); renderRows();
+}
+function updateDurationWorking(id, n) {
+  const tasks=getTasks(); const t=tasks.find(x=>x.id===id); if(!t) return;
+  const days=parseInt(n); if(!days||days<1) return;
+  t.e=endFromWorkingDays(t.s,days); setTasks(tasks); renderHeader(); renderRows();
+}
+function toggleCol(pid) {
+  collapsed[pid]=!collapsed[pid]; saveCollapsed(); renderRows();
+}
+
+/* ════════════════════════════════════════════════════
+   FILTER
+════════════════════════════════════════════════════ */
+function applyFilter() { filterCat=g('filter-category').value; renderRows(); }
+function clearFilter()  { g('filter-category').value=''; filterCat=''; renderRows(); }
+function refreshCatFilter() {
+  const sel=g('filter-category'), cur=sel.value;
+  const used=[...new Set(getTasks().map(t=>t.cat))].sort();
+  sel.innerHTML='<option value="">All Categories</option>';
+  used.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;if(c===cur)o.selected=true;sel.appendChild(o);});
+}
+
+/* ════════════════════════════════════════════════════
+   TIMELINE
+════════════════════════════════════════════════════ */
+function bounds() {
+  let mn=today(), mx=addDays(today(),30);
+  getTasks().forEach(t=>{const s=parseDate(t.s),e=parseDate(t.e);if(s&&s<mn)mn=s;if(e&&e>mx)mx=e;});
+  return {mn:addDays(mn,-3),mx:addDays(mx,3)};
+}
+function getWeeks() {
+  const {mn,mx}=bounds(); const wks=[]; let c=weekStart(mn);
+  while(c<=mx){wks.push(new Date(c));c=addDays(c,7);}
+  return {wks,mn};
+}
+
+/* ════════════════════════════════════════════════════
+   RENDER HEADER
+════════════════════════════════════════════════════ */
+const PXW = 52;
+function renderHeader() {
+  const {wks}=getWeeks(), td=today(), hdr=g('table-header');
+  hdr.innerHTML='';
+  [{cls:'col-task',lbl:'Task / Subtask'},{cls:'col-category',lbl:'Category'},
+   {cls:'col-assignee',lbl:'Assignee'},{cls:'col-start',lbl:'Start'},
+   {cls:'col-end',lbl:'End'},{cls:'col-dur',lbl:'Days'},{cls:'col-del',lbl:''}
+  ].forEach(c=>{
+    const th=document.createElement('th'); th.className=c.cls; th.textContent=c.lbl;
+    if(c.cls==='col-dur') th.style.textAlign='right';
+    hdr.appendChild(th);
+  });
+  wks.forEach(w=>{
+    const th=document.createElement('th'); th.className='week-col';
+    const wEnd=addDays(w,6), isCur=td>=w&&td<=wEnd;
+    let hasHol=false; for(let d=0;d<7;d++){if(isNonWorking(addDays(w,d))){hasHol=true;break;}}
+    if(isCur) th.classList.add('current-week'); else if(hasHol) th.classList.add('holiday-week');
+    th.innerHTML=`<div class="week-col-label">${fmtShort(w)}</div>`;
+    hdr.appendChild(th);
+  });
+}
+
+/* ════════════════════════════════════════════════════
+   BAR CONTAINER
+════════════════════════════════════════════════════ */
+function buildBar(task, wks, mn, isSub) {
+  const totalW=wks.length*PXW, td=today();
+  const wrap=document.createElement('div');
+  wrap.className='gantt-bar-container'; wrap.style.width=totalW+'px';
+
+  // Holiday stripes
+  wks.forEach((w,wi)=>{
+    for(let d=0;d<7;d++){
+      const day=addDays(w,d);
+      if(isNonWorking(day)){
+        const stripe=document.createElement('div'); stripe.className='hol-stripe';
+        stripe.style.left=(wi*PXW+d*(PXW/7))+'px'; stripe.style.width=(PXW/7)+'px';
+        wrap.appendChild(stripe);
+      }
+    }
+  });
+
+  // Today line
+  const tOff=diffDays(mn,td)*(PXW/7);
+  if(tOff>=0&&tOff<=totalW){
+    const tl=document.createElement('div'); tl.className='today-line'; tl.style.left=tOff+'px';
+    wrap.appendChild(tl);
+  }
+
+  // Bar
+  const s=parseDate(task.s),e=parseDate(task.e);
+  if(s&&e&&e>=s){
+    const left=Math.max(0,diffDays(mn,s)*(PXW/7));
+    const width=Math.max(6,(diffDays(s,e)+1)*(PXW/7));
+    const lblDays=isSub?workingDays(task.s,task.e):(diffDays(s,e)+1);
+
+    const bg=document.createElement('div'); bg.className='gantt-bar-bg';
+    bg.style.left=left+'px'; bg.style.width=width+'px';
+
+    const fill=document.createElement('div');
+    fill.className='gantt-bar-fill'+(isSub?'':' parent-fill');
+    bg.appendChild(fill);
+
+    const lbl=document.createElement('div'); lbl.className='gantt-bar-label';
+    lbl.textContent=lblDays+'d'; bg.appendChild(lbl);
+    wrap.appendChild(bg);
+  }
+  return wrap;
+}
+
+/* ════════════════════════════════════════════════════
+   RENDER ROWS
+════════════════════════════════════════════════════ */
+function renderRows() {
+  refreshCatFilter();
+  const {wks,mn}=getWeeks(), tbody=g('table-body');
+  tbody.innerHTML='';
+
+  let pts=parents();
+  if(filterCat) pts=pts.filter(p=>p.cat===filterCat||children(p.id).some(c=>c.cat===filterCat));
+
+  pts.forEach(parent=>{
+    const kids=children(parent.id), isCol=!!collapsed[parent.id];
+    if(filterCat&&parent.cat!==filterCat&&!kids.some(c=>c.cat===filterCat)) return;
+
+    // ── PARENT ROW ──
+    const tr=document.createElement('tr'); tr.dataset.id=parent.id; tr.classList.add('is-parent');
+
+    // Name
+    const nameTd=document.createElement('td'); nameTd.className='col-task-cell';
+    const togHtml=kids.length
+      ?`<button class="toggle-btn" onclick="toggleCol('${parent.id}')">${isCol?'&#9654;':'&#9660;'}</button>`
+      :'<span style="display:inline-block;width:18px"></span>';
+    const addSub=`<button class="add-sub-btn" onclick="addSubtask('${parent.id}')" title="Add subtask">+ sub</button>`;
+    nameTd.innerHTML=`${togHtml}<input class="cell-input" type="text" value="${escQ(parent.name)}" style="width:134px;font-weight:700" oninput="updateField('${parent.id}','name',this.value)" />${addSub}`;
+    tr.appendChild(nameTd);
+
+    // Category
+    const catTd=document.createElement('td'); catTd.className='col-category';
+    catTd.innerHTML=`<select class="cell-input category-select" onchange="updateField('${parent.id}','cat',this.value)">${CATS.map(c=>`<option value="${c}"${c===parent.cat?' selected':''}>${c}</option>`).join('')}</select><span class="category-text">${esc(parent.cat)}</span>`;
+    tr.appendChild(catTd);
+
+    // Assignee
+    const whoTd=document.createElement('td'); whoTd.className='col-assignee';
+    whoTd.innerHTML=`<input class="cell-input" type="text" value="${escQ(parent.who)}" oninput="updateField('${parent.id}','who',this.value)" />`;
+    tr.appendChild(whoTd);
+
+    // Start
+    const sTd=document.createElement('td'); sTd.className='col-start';
+    sTd.innerHTML=`<input class="cell-input" type="date" value="${parent.s||''}" onchange="updateField('${parent.id}','s',this.value)" />`;
+    tr.appendChild(sTd);
+
+    // End
+    const eTd=document.createElement('td'); eTd.className='col-end';
+    eTd.innerHTML=`<input class="cell-input" type="date" value="${parent.e||''}" onchange="updateField('${parent.id}','e',this.value)" />`;
+    tr.appendChild(eTd);
+
+    // Duration — calendar days
+    const s_p=parseDate(parent.s),e_p=parseDate(parent.e);
+    const calDays=(s_p&&e_p&&e_p>=s_p)?diffDays(s_p,e_p)+1:0;
+    const durTd=document.createElement('td'); durTd.className='col-dur';
+    durTd.innerHTML=`<input class="dur-input" type="number" min="1" value="${calDays}" title="Calendar days (edit to shift end date)" onchange="updateDurationCalendar('${parent.id}',this.value)" />`;
+    tr.appendChild(durTd);
+
+    // Delete
+    const delTd=document.createElement('td'); delTd.className='col-del';
+    delTd.innerHTML=`<button class="del-btn" onclick="deleteTask('${parent.id}')" title="Delete task">&times;</button>`;
+    tr.appendChild(delTd);
+
+    // Bar
+    const gTd=document.createElement('td'); gTd.className='gantt-bar-cell'; gTd.colSpan=wks.length;
+    gTd.appendChild(buildBar(parent,wks,mn,false)); tr.appendChild(gTd);
+    tbody.appendChild(tr);
+
+    // ── SUBTASK ROWS ──
+    if(!isCol){
+      kids.forEach(child=>{
+        if(filterCat&&child.cat!==filterCat) return;
+        const ctr=document.createElement('tr'); ctr.dataset.id=child.id; ctr.classList.add('is-subtask');
+
+        const cName=document.createElement('td'); cName.className='col-task-cell subtask-indent';
+        cName.innerHTML=`<input class="cell-input" type="text" value="${escQ(child.name)}" style="width:164px" oninput="updateField('${child.id}','name',this.value)" />`;
+        ctr.appendChild(cName);
+
+        const cCat=document.createElement('td'); cCat.className='col-category';
+        cCat.innerHTML=`<select class="cell-input category-select" onchange="updateField('${child.id}','cat',this.value)">${CATS.map(c=>`<option value="${c}"${c===child.cat?' selected':''}>${c}</option>`).join('')}</select><span class="category-text">${esc(child.cat)}</span>`;
+        ctr.appendChild(cCat);
+
+        const cWho=document.createElement('td'); cWho.className='col-assignee';
+        cWho.innerHTML=`<input class="cell-input" type="text" value="${escQ(child.who)}" oninput="updateField('${child.id}','who',this.value)" />`;
+        ctr.appendChild(cWho);
+
+        const cS=document.createElement('td'); cS.className='col-start';
+        cS.innerHTML=`<input class="cell-input" type="date" value="${child.s||''}" onchange="updateField('${child.id}','s',this.value)" />`;
+        ctr.appendChild(cS);
+
+        const cE=document.createElement('td'); cE.className='col-end';
+        cE.innerHTML=`<input class="cell-input" type="date" value="${child.e||''}" onchange="updateField('${child.id}','e',this.value)" />`;
+        ctr.appendChild(cE);
+
+        const cD=document.createElement('td'); cD.className='col-dur';
+        cD.innerHTML=`<input class="dur-input" type="number" min="1" value="${workingDays(child.s,child.e)}" title="Working days (edit to shift end date)" onchange="updateDurationWorking('${child.id}',this.value)" />`;
+        ctr.appendChild(cD);
+
+        const cDel=document.createElement('td'); cDel.className='col-del';
+        cDel.innerHTML=`<button class="del-btn" onclick="deleteTask('${child.id}')" title="Delete subtask">&times;</button>`;
+        ctr.appendChild(cDel);
+
+        const cG=document.createElement('td'); cG.className='gantt-bar-cell'; cG.colSpan=wks.length;
+        cG.appendChild(buildBar(child,wks,mn,true)); ctr.appendChild(cG);
+        tbody.appendChild(ctr);
+      });
+    }
+  });
+}
+
+function render() { renderHeader(); renderRows(); }
+
+/* ════════════════════════════════════════════════════
+   TEMPLATE COPY MODAL
+════════════════════════════════════════════════════ */
+function openTmplModal() {
+  const sel=g('tmpl-source');
+  sel.innerHTML='';
+  houses.forEach(h=>{
+    if(h.id===activeHID) return;
+    const o=document.createElement('option'); o.value=h.id; o.textContent=h.label; sel.appendChild(o);
+  });
+  if(!sel.options.length){ showToast('No other houses to copy from.'); return; }
+  g('tmpl-start-date').value=toISO(today());
+  g('tmpl-overlay').classList.add('open');
+  g('tmpl-modal').classList.add('open');
+}
+function closeTmplModal() {
+  g('tmpl-overlay').classList.remove('open');
+  g('tmpl-modal').classList.remove('open');
+}
+function applyTemplate() {
+  const srcId=g('tmpl-source').value;
+  const newStartISO=g('tmpl-start-date').value;
+  const src=houses.find(h=>h.id===srcId); if(!src||!newStartISO){ closeTmplModal(); return; }
+
+  // Find earliest start in source
+  const srcTasks=src.tasks;
+  let earliest=null;
+  srcTasks.forEach(t=>{ const d=parseDate(t.s); if(!earliest||d<earliest) earliest=d; });
+  if(!earliest){ closeTmplModal(); return; }
+
+  const newStart=parseDate(newStartISO);
+  const shift=diffDays(earliest,newStart); // days to shift
+
+  // Clone tasks with new ids, shifted dates
+  const idMap={};
+  const cloned=srcTasks.map(t=>{
+    const newId=uid(); idMap[t.id]=newId;
+    return {
+      id:newId, name:t.name, cat:t.cat, who:t.who,
+      s:toISO(addDays(parseDate(t.s),shift)),
+      e:toISO(addDays(parseDate(t.e),shift)),
+      pid:t.pid||null
+    };
+  });
+  // Remap parent IDs
+  cloned.forEach(t=>{ if(t.pid) t.pid=idMap[t.pid]||null; });
+
+  activeHouse().tasks=cloned;
+  saveAll();
+  closeTmplModal();
+  render();
+  showToast(`Tasks copied from "${src.label}" and shifted to ${fmtFull(newStart)}.`);
+}
+
+/* ════════════════════════════════════════════════════
+   CATEGORY MANAGER
+════════════════════════════════════════════════════ */
+function openCatManager()  { renderCatList(); g('cat-manager').classList.add('open'); g('cat-overlay').classList.add('open'); g('cat-new-input').value=''; }
+function closeCatManager() { g('cat-manager').classList.remove('open'); g('cat-overlay').classList.remove('open'); render(); }
+
+function renderCatList() {
+  const list=g('cat-list'); list.innerHTML='';
+  CATS.forEach((cat,idx)=>{
+    const row=document.createElement('div'); row.className='cat-row';
+    const inp=document.createElement('input'); inp.className='cat-row-name'; inp.type='text'; inp.value=cat;
+    inp.onchange=function(){
+      const n=this.value.trim();
+      if(!n||CATS.includes(n)){this.value=cat;return;}
+      // Update all houses
+      houses.forEach(h=>h.tasks.forEach(t=>{if(t.cat===CATS[idx])t.cat=n;}));
+      CATS[idx]=n; saveCats(); saveAll(); renderCatList();
+    };
+    row.appendChild(inp);
+    if(CATS.length>1){
+      const del=document.createElement('button'); del.className='cat-del-btn'; del.innerHTML='&times;';
+      del.onclick=()=>{
+        const fb=CATS.find(c=>c!==cat)||'';
+        houses.forEach(h=>h.tasks.forEach(t=>{if(t.cat===cat)t.cat=fb;}));
+        CATS.splice(idx,1); saveCats(); saveAll(); renderCatList();
+      };
+      row.appendChild(del);
+    }
+    list.appendChild(row);
+  });
+}
+function addCategory() {
+  const inp=g('cat-new-input'), name=inp.value.trim();
+  if(!name||CATS.includes(name)){inp.focus();return;}
+  CATS.push(name); saveCats(); inp.value=''; renderCatList();
+}
+
+/* ════════════════════════════════════════════════════
+   PRESENTATION MODE
+════════════════════════════════════════════════════ */
+function enterPresentation() {
+  document.body.classList.add('present-mode');
+  if(document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(()=>{});
+}
+function exitPresentation() {
+  document.body.classList.remove('present-mode');
+  if(document.fullscreenElement) document.exitFullscreen().catch(()=>{});
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.body.classList.contains('present-mode'))exitPresentation();});
+
+/* ════════════════════════════════════════════════════
+   PDF HEADER
+════════════════════════════════════════════════════ */
+function updatePdfHeader() {
+  const m=getMeta();
+  g('pdf-title-text').textContent=m.name||'Project Gantt Chart';
+  const parts=[];
+  if(m.location) parts.push(m.location);
+  if(m.owner)    parts.push('Owner: '+m.owner);
+  if(m.by)       parts.push('Prepared by: '+m.by);
+  if(m.date)     parts.push('Report Date: '+fmtFull(parseDate(m.date)));
+  g('pdf-sub-text').textContent=parts.join('  |  ');
+}
+
+/* ════════════════════════════════════════════════════
+   EXPORTS
+════════════════════════════════════════════════════ */
+function exportCSV() {
+  const hdr=['Type','Task Name','Category','Assignee','Start','End','Days'];
+  const rows=[];
+  parents().forEach(p=>{
+    const cd=(parseDate(p.s)&&parseDate(p.e))?(diffDays(parseDate(p.s),parseDate(p.e))+1):0;
+    rows.push(['Parent',p.name,p.cat,p.who,p.s,p.e,cd].map(v=>`"${String(v||'').replace(/"/g,'""')}"`).join(','));
+    children(p.id).forEach(c=>{
+      rows.push(['Subtask',c.name,c.cat,c.who,c.s,c.e,workingDays(c.s,c.e)].map(v=>`"${String(v||'').replace(/"/g,'""')}"`).join(','));
+    });
+  });
+  const csv=[hdr.join(','),...rows].join('\n');
+  const blob=new Blob([csv],{type:'text/csv'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  const m=getMeta();
+  const proj=(m.name||'Gantt').replace(/\s+/g,'_');
+  const dt=(m.date||toISO(today())).replace(/-/g,'');
+  a.href=url; a.download=`${proj}_Tasks_${dt}.csv`; a.click();
+  URL.revokeObjectURL(url); showToast('CSV exported.');
+}
+
+function exportPNG() {
+  showToast('Preparing PNG...');
+  document.body.classList.add('pdf-export'); updatePdfHeader();
+  setTimeout(()=>{
+    html2canvas(g('app'),{scale:2,useCORS:true,backgroundColor:'#FFFFFF'}).then(canvas=>{
+      document.body.classList.remove('pdf-export');
+      const url=canvas.toDataURL('image/png'), a=document.createElement('a');
+      const m=getMeta();
+      const proj=(m.name||'Gantt').replace(/\s+/g,'_'), dt=(m.date||toISO(today())).replace(/-/g,'');
+      a.href=url; a.download=`${proj}_Gantt_${dt}.png`; a.click(); showToast('PNG exported.');
+    }).catch(err=>{document.body.classList.remove('pdf-export');showToast('PNG failed.');console.error(err);});
+  },120);
+}
+
+function exportPDF() {
+  showToast('Preparing PDF...');
+  document.body.classList.add('pdf-export'); updatePdfHeader();
+  setTimeout(()=>{
+    html2canvas(g('app'),{scale:2,useCORS:true,backgroundColor:'#FFFFFF'}).then(canvas=>{
+      document.body.classList.remove('pdf-export');
+      const {jsPDF}=window.jspdf;
+      const pdf=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
+      const pw=pdf.internal.pageSize.getWidth(),ph=pdf.internal.pageSize.getHeight();
+      const mg=10,iw=pw-mg*2,ih=iw*(canvas.height/canvas.width);
+      const pch=ph-mg*2,total=Math.ceil(ih/pch);
+      for(let p=0;p<total;p++){
+        if(p>0) pdf.addPage();
+        const srcY=p*pch*(canvas.width/iw);
+        const srcH=Math.min(pch*(canvas.width/iw),canvas.height-srcY);
+        const slH=Math.min(pch,ih-p*pch);
+        const sc=document.createElement('canvas'); sc.width=canvas.width; sc.height=srcH;
+        sc.getContext('2d').drawImage(canvas,0,srcY,canvas.width,srcH,0,0,canvas.width,srcH);
+        pdf.addImage(sc.toDataURL('image/png'),'PNG',mg,mg,iw,slH);
+        pdf.setFontSize(7); pdf.setTextColor(136,136,136);
+        pdf.text('Foro Consulting Inc.',pw-mg,ph-4,{align:'right'});
+        pdf.text(`Page ${p+1} of ${total}`,mg,ph-4);
+      }
+      const m=getMeta();
+      const proj=(m.name||'Gantt').replace(/\s+/g,'_'), dt=(m.date||toISO(today())).replace(/-/g,'');
+      pdf.save(`${proj}_Gantt_${dt}.pdf`); showToast('PDF exported.');
+    }).catch(err=>{document.body.classList.remove('pdf-export');showToast('PDF failed.');console.error(err);});
+  },150);
+}
+
+/* ════════════════════════════════════════════════════
+   TOAST
+════════════════════════════════════════════════════ */
+let _tt=null;
+function showToast(msg) {
+  const t=g('toast'); t.textContent=msg; t.classList.add('show');
+  if(_tt) clearTimeout(_tt); _tt=setTimeout(()=>t.classList.remove('show'),3000);
+}
+
+/* ════════════════════════════════════════════════════
+   INIT
+════════════════════════════════════════════════════ */
+loadAll();
+renderTabs();
+loadMetaIntoUI();
+render();
+</script>
+</body>
+</html>
