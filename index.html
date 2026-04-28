@@ -189,7 +189,61 @@ html, body { font-family: var(--font); background: var(--white); color: var(--ch
 .legend-critical { display: inline-block; width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; background: var(--critical); opacity: 0.7; vertical-align: middle; }
 .legend-dep-line { display: inline-block; width: 20px; height: 2px; border-top: 1.5px dashed #C4A0AD; vertical-align: middle; flex-shrink: 0; }
 
-/* ── ROWS ── */
+/* ── DRAG TO REORDER ── */
+.col-drag { min-width: 20px; width: 20px; padding: 0 !important; cursor: grab; text-align: center; }
+.col-drag:active { cursor: grabbing; }
+.drag-handle {
+  display: inline-block; color: #CCC; font-size: 13px; line-height: 1;
+  padding: 4px 3px; cursor: grab; user-select: none; vertical-align: middle;
+  transition: color 0.12s;
+}
+.drag-handle:hover { color: var(--rose); }
+tr.drag-over-above { box-shadow: 0 -2px 0 0 var(--rose); }
+tr.drag-over-below { box-shadow: 0 2px 0 0 var(--rose); }
+tr.dragging { opacity: 0.38; background: var(--row-hover) !important; }
+
+/* ── TEXT WRAP — task name cell grows with content ── */
+.task-name-wrap {
+  display: inline-block; vertical-align: middle;
+  min-width: 80px; max-width: 220px;
+}
+.task-name-wrap .cell-input {
+  white-space: normal; word-break: break-word;
+  height: auto; min-height: 22px; resize: none;
+  line-height: 1.35; overflow: hidden;
+}
+/* Assignee and other text cells also wrap */
+.col-assignee .cell-input {
+  white-space: normal; word-break: break-word; height: auto; min-height: 22px;
+}
+#gantt-table tbody td { vertical-align: top; padding-top: 8px; padding-bottom: 8px; }
+#gantt-table tbody td.gantt-bar-cell { vertical-align: middle; padding-top: 0; padding-bottom: 0; }
+
+/* ── COLUMN VISIBILITY ── */
+.col-category.col-hidden,
+.col-assignee.col-hidden,
+.col-start.col-hidden,
+.col-end.col-hidden,
+.col-dur.col-hidden,
+.col-dep.col-hidden { display: none !important; }
+
+#col-toggle-panel {
+  display: none; position: absolute; top: calc(100% + 4px); right: 0;
+  background: var(--white); border: 1px solid var(--border);
+  border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+  padding: 10px 14px; z-index: 500; min-width: 170px;
+  flex-direction: column; gap: 2px;
+}
+#col-toggle-panel.open { display: flex; }
+#col-toggle-panel label {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--charcoal); cursor: pointer;
+  padding: 5px 4px; border-radius: 4px; user-select: none;
+  transition: background 0.1s;
+}
+#col-toggle-panel label:hover { background: var(--canvas); }
+#col-toggle-panel input[type="checkbox"] { accent-color: var(--rose); cursor: pointer; width: 14px; height: 14px; flex-shrink: 0; }
+#col-toggle-wrap { position: relative; }
 #gantt-table tbody tr { border-bottom: 1px solid var(--border); transition: background 0.1s; }
 #gantt-table tbody tr:hover { background: var(--row-hover); }
 #gantt-table tbody td { padding: 6px 8px; vertical-align: middle; }
@@ -406,6 +460,17 @@ body.pdf-export .category-text { display: inline !important; }
       <button class="btn primary" onclick="addTask()">+ Add Task</button>
       <button class="btn" onclick="openTmplModal()">Copy Template</button>
       <button class="btn" onclick="openCatManager()">Categories</button>
+      <div id="col-toggle-wrap">
+        <button class="btn" onclick="toggleColPanel(event)">Columns</button>
+        <div id="col-toggle-panel">
+          <label><input type="checkbox" id="vis-category" checked onchange="setColVis('category',this.checked)"> Category</label>
+          <label><input type="checkbox" id="vis-assignee" checked onchange="setColVis('assignee',this.checked)"> Assignee</label>
+          <label><input type="checkbox" id="vis-start"    checked onchange="setColVis('start',this.checked)"> Start Date</label>
+          <label><input type="checkbox" id="vis-end"      checked onchange="setColVis('end',this.checked)"> End Date</label>
+          <label><input type="checkbox" id="vis-dur"      checked onchange="setColVis('dur',this.checked)"> Days</label>
+          <label><input type="checkbox" id="vis-dep"      checked onchange="setColVis('dep',this.checked)"> Depends On</label>
+        </div>
+      </div>
       <button class="btn primary" onclick="enterPresentation()">Present</button>
       <button class="btn" onclick="exportCSV()">Export CSV</button>
       <button class="btn" onclick="exportPNG()">Export PNG</button>
@@ -890,9 +955,42 @@ function getWeeks() {
    RENDER HEADER
 ════════════════════════════════════════════════════ */
 const PXW = 52;
+const SK_VIS = 'foro_lopa_colvis';
+let colVis = { category:true, assignee:true, start:true, end:true, dur:true, dep:true };
+
+function loadColVis() {
+  try { const r=localStorage.getItem(SK_VIS); if(r){ colVis=JSON.parse(r); } } catch(e){}
+  // Sync checkboxes
+  Object.keys(colVis).forEach(k => {
+    const el = g('vis-'+k); if(el) el.checked = colVis[k];
+  });
+  applyColVis();
+}
+function setColVis(col, visible) {
+  colVis[col] = visible;
+  localStorage.setItem(SK_VIS, JSON.stringify(colVis));
+  applyColVis();
+}
+function applyColVis() {
+  document.querySelectorAll('.col-category').forEach(el => el.classList.toggle('col-hidden', !colVis.category));
+  document.querySelectorAll('.col-assignee').forEach(el => el.classList.toggle('col-hidden', !colVis.assignee));
+  document.querySelectorAll('.col-start').forEach(el    => el.classList.toggle('col-hidden', !colVis.start));
+  document.querySelectorAll('.col-end').forEach(el      => el.classList.toggle('col-hidden', !colVis.end));
+  document.querySelectorAll('.col-dur').forEach(el      => el.classList.toggle('col-hidden', !colVis.dur));
+  document.querySelectorAll('.col-dep').forEach(el      => el.classList.toggle('col-hidden', !colVis.dep));
+}
+function toggleColPanel(e) {
+  e.stopPropagation();
+  g('col-toggle-panel').classList.toggle('open');
+}
+document.addEventListener('click', () => g('col-toggle-panel')?.classList.remove('open'));
+
 function renderHeader() {
   const {wks}=getWeeks(), td=today(), hdr=g('table-header');
   hdr.innerHTML='';
+  // Drag handle header
+  const thDrag=document.createElement('th'); thDrag.className='col-drag'; thDrag.textContent=''; hdr.appendChild(thDrag);
+
   [{cls:'col-task',lbl:'Task / Subtask'},{cls:'col-category',lbl:'Category'},
    {cls:'col-assignee',lbl:'Assignee'},{cls:'col-start',lbl:'Start'},
    {cls:'col-end',lbl:'End'},{cls:'col-dur',lbl:'Days'},
@@ -910,6 +1008,7 @@ function renderHeader() {
     th.innerHTML=`<div class="week-col-label">${fmtShort(w)}</div>`;
     hdr.appendChild(th);
   });
+  applyColVis();
 }
 
 /* ════════════════════════════════════════════════════
@@ -986,14 +1085,26 @@ function renderRows() {
     const tr=document.createElement('tr'); tr.dataset.id=parent.id; tr.classList.add('is-parent');
     if(pCrit) tr.classList.add('is-critical');
 
-    // Name (with optional critical badge)
+    // Drag handle
+    const dragTd=document.createElement('td'); dragTd.className='col-drag';
+    dragTd.innerHTML='<span class="drag-handle" title="Drag to reorder">&#8942;&#8942;</span>';
+    tr.appendChild(dragTd);
+
+    // Name (with optional critical badge) — textarea for wrapping
     const nameTd=document.createElement('td'); nameTd.className='col-task-cell';
     const togHtml=kids.length
       ?`<button class="toggle-btn" onclick="toggleCol('${parent.id}')">${isCol?'&#9654;':'&#9660;'}</button>`
       :'<span style="display:inline-block;width:18px"></span>';
     const addSub=`<button class="add-sub-btn" onclick="addSubtask('${parent.id}')" title="Add subtask">+ sub</button>`;
     const critBadge = pCrit ? '<span class="crit-badge">Critical</span>' : '';
-    nameTd.innerHTML=`${togHtml}<input class="cell-input" type="text" value="${escQ(parent.name)}" style="width:118px;font-weight:700" oninput="updateField('${parent.id}','name',this.value)" />${critBadge}${addSub}`;
+    const pNameTA = document.createElement('textarea');
+    pNameTA.className='cell-input'; pNameTA.rows=1;
+    pNameTA.style.cssText='width:130px;font-weight:700;resize:none;overflow:hidden;line-height:1.35;min-height:22px;';
+    pNameTA.value = parent.name||'';
+    pNameTA.oninput = function(){ autoGrow(this); updateField(parent.id,'name',this.value); };
+    nameTd.appendChild(document.createRange().createContextualFragment(togHtml));
+    nameTd.appendChild(pNameTA);
+    nameTd.insertAdjacentHTML('beforeend', critBadge+addSub);
     tr.appendChild(nameTd);
 
     // Category
@@ -1001,9 +1112,13 @@ function renderRows() {
     catTd.innerHTML=`<select class="cell-input category-select" onchange="updateField('${parent.id}','cat',this.value)">${CATS.map(c=>`<option value="${c}"${c===parent.cat?' selected':''}>${c}</option>`).join('')}</select><span class="category-text">${esc(parent.cat)}</span>`;
     tr.appendChild(catTd);
 
-    // Assignee
+    // Assignee — textarea for wrapping
     const whoTd=document.createElement('td'); whoTd.className='col-assignee';
-    whoTd.innerHTML=`<input class="cell-input" type="text" value="${escQ(parent.who)}" oninput="updateField('${parent.id}','who',this.value)" />`;
+    const whoTA=document.createElement('textarea'); whoTA.className='cell-input'; whoTA.rows=1;
+    whoTA.style.cssText='width:100%;resize:none;overflow:hidden;line-height:1.35;min-height:22px;';
+    whoTA.value=parent.who||'';
+    whoTA.oninput=function(){ autoGrow(this); updateField(parent.id,'who',this.value); };
+    whoTd.appendChild(whoTA);
     tr.appendChild(whoTd);
 
     // Start
@@ -1037,6 +1152,9 @@ function renderRows() {
     // Bar
     const gTd=document.createElement('td'); gTd.className='gantt-bar-cell'; gTd.colSpan=wks.length;
     gTd.appendChild(buildBar(parent,wks,mn,false,pCrit)); tr.appendChild(gTd);
+
+    // Drag events (parent rows only — dragging a parent moves it + its children)
+    addDragEvents(tr, parent.id, false);
     tbody.appendChild(tr);
 
     // ── SUBTASK ROWS ──
@@ -1047,9 +1165,19 @@ function renderRows() {
         const ctr=document.createElement('tr'); ctr.dataset.id=child.id; ctr.classList.add('is-subtask');
         if(cCrit) ctr.classList.add('is-critical');
 
+        // Drag handle (subtask)
+        const cDragTd=document.createElement('td'); cDragTd.className='col-drag';
+        cDragTd.innerHTML='<span class="drag-handle" style="color:#ddd">&#8942;&#8942;</span>';
+        ctr.appendChild(cDragTd);
+
         const cName=document.createElement('td'); cName.className='col-task-cell subtask-indent';
         const cCritBadge = cCrit ? '<span class="crit-badge">Critical</span>' : '';
-        cName.innerHTML=`<input class="cell-input" type="text" value="${escQ(child.name)}" style="width:148px" oninput="updateField('${child.id}','name',this.value)" />${cCritBadge}`;
+        const cNameTA=document.createElement('textarea'); cNameTA.className='cell-input'; cNameTA.rows=1;
+        cNameTA.style.cssText='width:150px;resize:none;overflow:hidden;line-height:1.35;min-height:22px;';
+        cNameTA.value=child.name||'';
+        cNameTA.oninput=function(){ autoGrow(this); updateField(child.id,'name',this.value); };
+        cName.appendChild(cNameTA);
+        cName.insertAdjacentHTML('beforeend', cCritBadge);
         ctr.appendChild(cName);
 
         const cCat=document.createElement('td'); cCat.className='col-category';
@@ -1057,7 +1185,11 @@ function renderRows() {
         ctr.appendChild(cCat);
 
         const cWho=document.createElement('td'); cWho.className='col-assignee';
-        cWho.innerHTML=`<input class="cell-input" type="text" value="${escQ(child.who)}" oninput="updateField('${child.id}','who',this.value)" />`;
+        const cWhoTA=document.createElement('textarea'); cWhoTA.className='cell-input'; cWhoTA.rows=1;
+        cWhoTA.style.cssText='width:100%;resize:none;overflow:hidden;line-height:1.35;min-height:22px;';
+        cWhoTA.value=child.who||'';
+        cWhoTA.oninput=function(){ autoGrow(this); updateField(child.id,'who',this.value); };
+        cWho.appendChild(cWhoTA);
         ctr.appendChild(cWho);
 
         const cS=document.createElement('td'); cS.className='col-start';
@@ -1085,13 +1217,19 @@ function renderRows() {
 
         const cG=document.createElement('td'); cG.className='gantt-bar-cell'; cG.colSpan=wks.length;
         cG.appendChild(buildBar(child,wks,mn,true,cCrit)); ctr.appendChild(cG);
+        addDragEvents(ctr, child.id, true);
         tbody.appendChild(ctr);
       });
     }
   });
 
   // Draw dependency arrows after rows are rendered
-  requestAnimationFrame(()=>drawDependencyArrows(critSet));
+  requestAnimationFrame(()=>{
+    // Auto-grow all textareas
+    document.querySelectorAll('#table-body textarea.cell-input').forEach(autoGrow);
+    applyColVis();
+    drawDependencyArrows(critSet);
+  });
 }
 
 /* Build <option> list for dependency dropdown */
@@ -1397,6 +1535,120 @@ function restoreData(event) {
 }
 
 /* ════════════════════════════════════════════════════
+   AUTO-GROW TEXTAREA
+════════════════════════════════════════════════════ */
+function autoGrow(el) {
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
+
+/* ════════════════════════════════════════════════════
+   DRAG-TO-REORDER
+   Rules:
+   - Parent rows: can be dragged to any parent position.
+     Moving a parent also moves all its children with it.
+   - Subtask rows: can only be reordered within the same parent.
+════════════════════════════════════════════════════ */
+let dragId    = null;
+let dragIsSub = false;
+
+function addDragEvents(tr, taskId, isSub) {
+  tr.draggable = true;
+
+  tr.addEventListener('dragstart', e => {
+    // Only start drag from handle
+    if (!e.target.classList.contains('drag-handle') && !e.target.closest('.drag-handle')) {
+      e.preventDefault(); return;
+    }
+    dragId    = taskId;
+    dragIsSub = isSub;
+    tr.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', taskId);
+  });
+
+  tr.addEventListener('dragend', () => {
+    tr.classList.remove('dragging');
+    document.querySelectorAll('.drag-over-above,.drag-over-below').forEach(el=>{
+      el.classList.remove('drag-over-above','drag-over-below');
+    });
+    dragId = null;
+  });
+
+  tr.addEventListener('dragover', e => {
+    if (!dragId || dragId === taskId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+
+    const rect = tr.getBoundingClientRect();
+    const mid  = rect.top + rect.height / 2;
+    document.querySelectorAll('.drag-over-above,.drag-over-below').forEach(el=>{
+      el.classList.remove('drag-over-above','drag-over-below');
+    });
+    tr.classList.add(e.clientY < mid ? 'drag-over-above' : 'drag-over-below');
+  });
+
+  tr.addEventListener('dragleave', () => {
+    tr.classList.remove('drag-over-above','drag-over-below');
+  });
+
+  tr.addEventListener('drop', e => {
+    e.preventDefault();
+    if (!dragId || dragId === taskId) return;
+    tr.classList.remove('drag-over-above','drag-over-below');
+
+    const tasks    = getTasks();
+    const srcTask  = tasks.find(t=>t.id===dragId);
+    const tgtTask  = tasks.find(t=>t.id===taskId);
+    if (!srcTask || !tgtTask) return;
+
+    const rect  = tr.getBoundingClientRect();
+    const above = e.clientY < rect.top + rect.height / 2;
+
+    if (!dragIsSub && !isSub) {
+      // ── Parent → Parent reorder ──
+      // Collect src group (parent + its children)
+      const srcChildren = tasks.filter(t=>t.pid===srcTask.id);
+      const srcGroup    = [srcTask, ...srcChildren];
+      const srcIds      = new Set(srcGroup.map(t=>t.id));
+
+      // Remove src group from array
+      const without = tasks.filter(t=>!srcIds.has(t.id));
+
+      // Find target parent index in without
+      const tgtParentIdx = without.findIndex(t=>t.id===tgtTask.id);
+      if (tgtParentIdx === -1) return;
+
+      // If inserting below target, skip past target's children too
+      let insertAt = tgtParentIdx + (above ? 0 : 1);
+      if (!above) {
+        // skip tgt's children
+        while (insertAt < without.length && without[insertAt].pid === tgtTask.id) insertAt++;
+      }
+
+      without.splice(insertAt, 0, ...srcGroup);
+      setTasks(without);
+
+    } else if (dragIsSub && isSub && srcTask.pid === tgtTask.pid) {
+      // ── Subtask → Subtask within same parent ──
+      const srcIdx = tasks.findIndex(t=>t.id===srcTask.id);
+      const tgtIdx = tasks.findIndex(t=>t.id===tgtTask.id);
+      if (srcIdx === -1 || tgtIdx === -1) return;
+
+      const reordered = [...tasks];
+      reordered.splice(srcIdx, 1);
+      const newTgtIdx = reordered.findIndex(t=>t.id===tgtTask.id);
+      reordered.splice(above ? newTgtIdx : newTgtIdx+1, 0, srcTask);
+      setTasks(reordered);
+    } else {
+      return; // cross-parent subtask drag not supported
+    }
+
+    render();
+  });
+}
+
+/* ════════════════════════════════════════════════════
    TOAST
 ════════════════════════════════════════════════════ */
 let _tt=null;
@@ -1411,6 +1663,7 @@ function showToast(msg) {
 loadAll();
 renderTabs();
 loadMetaIntoUI();
+loadColVis();
 render();
 
 // Redraw arrows on scroll
