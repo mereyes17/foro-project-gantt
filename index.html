@@ -13,6 +13,7 @@
   --secondary: #888; --rose: #C4A0AD;
   --rose-bg: rgba(196,160,173,0.10); --rose-mid: rgba(196,160,173,0.22);
   --border: #EAEAEA; --row-hover: #FBEAF0; --sub-bg: #FDFCFC;
+  --critical: #C0392B; --critical-bg: rgba(192,57,43,0.08); --critical-mid: rgba(192,57,43,0.25);
   --font: 'Helvetica Neue', Helvetica, Arial, sans-serif;
 }
 html, body { font-family: var(--font); background: var(--white); color: var(--charcoal); font-size: 13px; min-height: 100vh; }
@@ -137,11 +138,56 @@ html, body { font-family: var(--font); background: var(--white); color: var(--ch
 .col-start    { min-width: 98px; width: 98px; }
 .col-end      { min-width: 98px; width: 98px; }
 .col-dur      { min-width: 58px; width: 58px; text-align: right !important; }
+.col-dep      { min-width: 130px; width: 130px; }
 .col-del      { min-width: 32px; width: 32px; text-align: center !important; }
 .week-col     { min-width: 52px; width: 52px; text-align: center; border-left: 1px solid var(--border); }
 .week-col.current-week { background: rgba(196,160,173,0.08); }
 .week-col.holiday-week { background: rgba(220,180,180,0.09); }
 .week-col-label { font-size: 9px; letter-spacing: 0.04em; color: var(--secondary); }
+
+/* ── CRITICAL PATH ── */
+#gantt-table tbody tr.is-critical { border-left-color: var(--critical) !important; }
+#gantt-table tbody tr.is-critical .col-task-cell { border-left: none; }
+#gantt-table tbody tr.is-critical.is-parent { background: #FDF2F1; }
+#gantt-table tbody tr.is-critical.is-parent .col-task-cell { background: #FDF2F1; }
+#gantt-table tbody tr.is-critical.is-parent:hover,
+#gantt-table tbody tr.is-critical.is-parent:hover .col-task-cell { background: #FAE8E7; }
+#gantt-table tbody tr.is-critical.is-subtask { background: #FEF7F7; }
+#gantt-table tbody tr.is-critical.is-subtask .col-task-cell { background: #FEF7F7; }
+
+/* Critical bar */
+.gantt-bar-bg.critical-bar { background: var(--critical-bg); border-color: var(--critical-mid); }
+.gantt-bar-fill.critical-fill { background: var(--critical); opacity: 0.80; }
+
+/* Critical badge */
+.crit-badge {
+  display: inline-block; font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase;
+  background: #FDEBEC; color: var(--critical); border-radius: 9999px;
+  padding: 1px 6px; margin-left: 4px; vertical-align: middle; white-space: nowrap;
+}
+
+/* Dependency connector lines drawn on SVG overlay */
+#dep-svg {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  pointer-events: none; overflow: visible; z-index: 5;
+}
+.dep-line { stroke: #C4A0AD; stroke-width: 1.5; fill: none; stroke-dasharray: 4 3; opacity: 0.7; }
+.dep-line.critical-dep { stroke: var(--critical); opacity: 0.6; }
+.dep-arrow { fill: #C4A0AD; opacity: 0.7; }
+.dep-arrow.critical-dep { fill: var(--critical); }
+
+/* Dep select */
+.dep-select {
+  font-family: var(--font); font-size: 11px; color: var(--secondary);
+  background: transparent; border: 1px solid transparent;
+  border-radius: 3px; padding: 2px 2px; width: 100%; outline: none; cursor: pointer;
+  transition: border-color 0.12s;
+}
+.dep-select:focus { border-color: var(--rose); background: var(--white); color: var(--charcoal); }
+
+/* Legend additions */
+.legend-critical { display: inline-block; width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; background: var(--critical); opacity: 0.7; vertical-align: middle; }
+.legend-dep-line { display: inline-block; width: 20px; height: 2px; border-top: 1.5px dashed #C4A0AD; vertical-align: middle; flex-shrink: 0; }
 
 /* ── ROWS ── */
 #gantt-table tbody tr { border-bottom: 1px solid var(--border); transition: background 0.1s; }
@@ -301,6 +347,8 @@ body.present-mode #cat-manager,
 body.present-mode #cat-overlay,
 body.present-mode #tmpl-modal,
 body.present-mode #tmpl-overlay,
+body.present-mode #restore-input,
+body.present-mode .dep-select,
 body.present-mode .cell-input { display: none !important; }
 body.present-mode #meta-panel input { border-bottom: none; pointer-events: none; }
 body.present-mode .dur-input { border: none; pointer-events: none; background: transparent; color: var(--rose); }
@@ -317,6 +365,7 @@ body.pdf-export #add-row-area,
 body.pdf-export .del-btn,
 body.pdf-export .add-sub-btn,
 body.pdf-export .toggle-btn,
+body.pdf-export .dep-select,
 body.pdf-export #house-tabs-bar { display: none !important; }
 body.pdf-export .cell-input { border: none !important; background: transparent !important; pointer-events: none; }
 body.pdf-export .dur-input  { border: none !important; background: transparent !important; pointer-events: none; color: var(--rose); }
@@ -361,6 +410,8 @@ body.pdf-export .category-text { display: inline !important; }
       <button class="btn" onclick="exportCSV()">Export CSV</button>
       <button class="btn" onclick="exportPNG()">Export PNG</button>
       <button class="btn" onclick="exportPDF()">Export PDF</button>
+      <button class="btn" onclick="backupData()" title="Download all house data as a backup file">Backup Data</button>
+      <label class="btn" style="cursor:pointer" title="Restore from a backup file">Restore Data<input type="file" id="restore-input" accept=".json" style="display:none" onchange="restoreData(event)" /></label>
     </div>
     <button class="btn danger" id="present-exit" onclick="exitPresentation()">Exit Presentation</button>
   </div>
@@ -411,11 +462,15 @@ body.pdf-export .category-text { display: inline !important; }
   <!-- HOLIDAY LEGEND -->
   <div id="holiday-legend">
     <span class="legend-swatch"></span>
-    <span>Hatched = Sundays &amp; PH public holidays (excluded from subtask working day count)</span>
+    <span>Hatched = Sundays &amp; PH holidays</span>
+    <span style="margin-left:12px;display:flex;align-items:center;gap:5px"><span class="legend-critical"></span><span>Critical path</span></span>
+    <span style="margin-left:12px;display:flex;align-items:center;gap:5px"><span class="legend-dep-line"></span><span>Dependency link</span></span>
+    <span style="margin-left:8px;font-size:10px;color:var(--secondary)">All durations = calendar days</span>
   </div>
 
   <!-- GANTT -->
-  <div id="gantt-wrapper">
+  <div id="gantt-wrapper" style="position:relative">
+    <svg id="dep-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:5"></svg>
     <table id="gantt-table">
       <thead><tr class="col-header" id="table-header"></tr></thead>
       <tbody id="table-body"></tbody>
@@ -724,6 +779,86 @@ function updateDurationWorking(id, n) {
 function toggleCol(pid) {
   collapsed[pid]=!collapsed[pid]; saveCollapsed(); renderRows();
 }
+function updateDep(id, depId) {
+  const tasks=getTasks(); const t=tasks.find(x=>x.id===id); if(!t) return;
+  t.dep = depId || null; setTasks(tasks); renderRows();
+}
+
+/* ════════════════════════════════════════════════════
+   CRITICAL PATH  (longest path to project end)
+   Uses forward-pass / backward-pass on flat task list.
+   Dependency type: Finish-to-Start only.
+════════════════════════════════════════════════════ */
+function computeCriticalPath() {
+  const tasks = getTasks();
+  if (!tasks.length) return new Set();
+
+  // Build map id -> task
+  const map = {};
+  tasks.forEach(t => { map[t.id] = t; });
+
+  // Forward pass: earliest finish
+  const ef = {}; // id -> Date (earliest finish)
+  const es = {}; // id -> Date (earliest start)
+
+  function getEF(id, visited = new Set()) {
+    if (ef[id]) return ef[id];
+    if (visited.has(id)) return parseDate(map[id]?.e) || today(); // cycle guard
+    visited.add(id);
+    const t = map[id]; if (!t) return today();
+    let start = parseDate(t.s) || today();
+    if (t.dep && map[t.dep]) {
+      const predFinish = getEF(t.dep, visited);
+      if (predFinish > start) start = predFinish;
+    }
+    es[id] = start;
+    const end = parseDate(t.e) || start;
+    const dur = Math.max(0, diffDays(parseDate(t.s) || start, end));
+    ef[id] = new Date(Math.max(start.getTime(), addDays(start, dur).getTime()));
+    return ef[id];
+  }
+  tasks.forEach(t => getEF(t.id));
+
+  // Project end = max of all EF
+  let projEnd = null;
+  tasks.forEach(t => { if (!projEnd || ef[t.id] > projEnd) projEnd = ef[t.id]; });
+
+  // Backward pass: latest finish / latest start
+  const lf = {}; // id -> Date
+  const ls = {};
+  tasks.forEach(t => { lf[t.id] = new Date(projEnd); });
+
+  // For each task, if it has dependents, its LF = min of dependents' LS
+  tasks.forEach(t => {
+    if (t.dep && lf[t.dep] !== undefined) {
+      const depTask = map[t.dep];
+      if (depTask) {
+        const tStart = es[t.id] || parseDate(t.s) || today();
+        const tEnd   = ef[t.id];
+        const tDur   = diffDays(es[t.id] || parseDate(t.s), tEnd);
+        // LF of predecessor = min(current LF of pred, LS of this task)
+        const thisLS = new Date(tStart); // approximation
+        if (thisLS < lf[t.dep]) lf[t.dep] = new Date(thisLS);
+      }
+    }
+  });
+  tasks.forEach(t => {
+    const end = lf[t.id];
+    const s   = es[t.id]  || parseDate(t.s) || today();
+    const dur = diffDays(s, ef[t.id]);
+    ls[t.id]  = addDays(end, -dur);
+  });
+
+  // Total float = LS - ES; float == 0 → critical
+  const critical = new Set();
+  tasks.forEach(t => {
+    const esDate = es[t.id] || parseDate(t.s) || today();
+    const lsDate = ls[t.id] || esDate;
+    const fl = diffDays(esDate, lsDate);
+    if (fl <= 0) critical.add(t.id);
+  });
+  return critical;
+}
 
 /* ════════════════════════════════════════════════════
    FILTER
@@ -760,7 +895,8 @@ function renderHeader() {
   hdr.innerHTML='';
   [{cls:'col-task',lbl:'Task / Subtask'},{cls:'col-category',lbl:'Category'},
    {cls:'col-assignee',lbl:'Assignee'},{cls:'col-start',lbl:'Start'},
-   {cls:'col-end',lbl:'End'},{cls:'col-dur',lbl:'Days'},{cls:'col-del',lbl:''}
+   {cls:'col-end',lbl:'End'},{cls:'col-dur',lbl:'Days'},
+   {cls:'col-dep',lbl:'Depends On'},{cls:'col-del',lbl:''}
   ].forEach(c=>{
     const th=document.createElement('th'); th.className=c.cls; th.textContent=c.lbl;
     if(c.cls==='col-dur') th.style.textAlign='right';
@@ -779,10 +915,11 @@ function renderHeader() {
 /* ════════════════════════════════════════════════════
    BAR CONTAINER
 ════════════════════════════════════════════════════ */
-function buildBar(task, wks, mn, isSub) {
+function buildBar(task, wks, mn, isSub, isCritical) {
   const totalW=wks.length*PXW, td=today();
   const wrap=document.createElement('div');
   wrap.className='gantt-bar-container'; wrap.style.width=totalW+'px';
+  wrap.dataset.taskid = task.id;
 
   // Holiday stripes
   wks.forEach((w,wi)=>{
@@ -808,13 +945,15 @@ function buildBar(task, wks, mn, isSub) {
   if(s&&e&&e>=s){
     const left=Math.max(0,diffDays(mn,s)*(PXW/7));
     const width=Math.max(6,(diffDays(s,e)+1)*(PXW/7));
-    const lblDays=isSub?workingDays(task.s,task.e):(diffDays(s,e)+1);
+    const lblDays=diffDays(s,e)+1;
 
-    const bg=document.createElement('div'); bg.className='gantt-bar-bg';
+    const bg=document.createElement('div');
+    bg.className='gantt-bar-bg'+(isCritical?' critical-bar':'');
     bg.style.left=left+'px'; bg.style.width=width+'px';
+    bg.dataset.taskid=task.id; // for dependency arrow targeting
 
     const fill=document.createElement('div');
-    fill.className='gantt-bar-fill'+(isSub?'':' parent-fill');
+    fill.className='gantt-bar-fill'+(isCritical?' critical-fill':(isSub?'':' parent-fill'));
     bg.appendChild(fill);
 
     const lbl=document.createElement('div'); lbl.className='gantt-bar-label';
@@ -832,23 +971,29 @@ function renderRows() {
   const {wks,mn}=getWeeks(), tbody=g('table-body');
   tbody.innerHTML='';
 
+  const critSet = computeCriticalPath();
+  const allTasks = getTasks(); // for dependency dropdown options
+
   let pts=parents();
   if(filterCat) pts=pts.filter(p=>p.cat===filterCat||children(p.id).some(c=>c.cat===filterCat));
 
   pts.forEach(parent=>{
     const kids=children(parent.id), isCol=!!collapsed[parent.id];
     if(filterCat&&parent.cat!==filterCat&&!kids.some(c=>c.cat===filterCat)) return;
+    const pCrit = critSet.has(parent.id);
 
     // ── PARENT ROW ──
     const tr=document.createElement('tr'); tr.dataset.id=parent.id; tr.classList.add('is-parent');
+    if(pCrit) tr.classList.add('is-critical');
 
-    // Name
+    // Name (with optional critical badge)
     const nameTd=document.createElement('td'); nameTd.className='col-task-cell';
     const togHtml=kids.length
       ?`<button class="toggle-btn" onclick="toggleCol('${parent.id}')">${isCol?'&#9654;':'&#9660;'}</button>`
       :'<span style="display:inline-block;width:18px"></span>';
     const addSub=`<button class="add-sub-btn" onclick="addSubtask('${parent.id}')" title="Add subtask">+ sub</button>`;
-    nameTd.innerHTML=`${togHtml}<input class="cell-input" type="text" value="${escQ(parent.name)}" style="width:134px;font-weight:700" oninput="updateField('${parent.id}','name',this.value)" />${addSub}`;
+    const critBadge = pCrit ? '<span class="crit-badge">Critical</span>' : '';
+    nameTd.innerHTML=`${togHtml}<input class="cell-input" type="text" value="${escQ(parent.name)}" style="width:118px;font-weight:700" oninput="updateField('${parent.id}','name',this.value)" />${critBadge}${addSub}`;
     tr.appendChild(nameTd);
 
     // Category
@@ -871,12 +1016,18 @@ function renderRows() {
     eTd.innerHTML=`<input class="cell-input" type="date" value="${parent.e||''}" onchange="updateField('${parent.id}','e',this.value)" />`;
     tr.appendChild(eTd);
 
-    // Duration — calendar days
+    // Duration
     const s_p=parseDate(parent.s),e_p=parseDate(parent.e);
     const calDays=(s_p&&e_p&&e_p>=s_p)?diffDays(s_p,e_p)+1:0;
     const durTd=document.createElement('td'); durTd.className='col-dur';
-    durTd.innerHTML=`<input class="dur-input" type="number" min="1" value="${calDays}" title="Calendar days (edit to shift end date)" onchange="updateDurationCalendar('${parent.id}',this.value)" />`;
+    durTd.innerHTML=`<input class="dur-input" type="number" min="1" value="${calDays}" title="Calendar days" onchange="updateDurationCalendar('${parent.id}',this.value)" />`;
     tr.appendChild(durTd);
+
+    // Depends On
+    const depTd=document.createElement('td'); depTd.className='col-dep';
+    const depOpts = buildDepOptions(allTasks, parent.id, parent.dep||'');
+    depTd.innerHTML=`<select class="dep-select cell-input" onchange="updateDep('${parent.id}',this.value)">${depOpts}</select>`;
+    tr.appendChild(depTd);
 
     // Delete
     const delTd=document.createElement('td'); delTd.className='col-del';
@@ -885,17 +1036,20 @@ function renderRows() {
 
     // Bar
     const gTd=document.createElement('td'); gTd.className='gantt-bar-cell'; gTd.colSpan=wks.length;
-    gTd.appendChild(buildBar(parent,wks,mn,false)); tr.appendChild(gTd);
+    gTd.appendChild(buildBar(parent,wks,mn,false,pCrit)); tr.appendChild(gTd);
     tbody.appendChild(tr);
 
     // ── SUBTASK ROWS ──
     if(!isCol){
       kids.forEach(child=>{
         if(filterCat&&child.cat!==filterCat) return;
+        const cCrit = critSet.has(child.id);
         const ctr=document.createElement('tr'); ctr.dataset.id=child.id; ctr.classList.add('is-subtask');
+        if(cCrit) ctr.classList.add('is-critical');
 
         const cName=document.createElement('td'); cName.className='col-task-cell subtask-indent';
-        cName.innerHTML=`<input class="cell-input" type="text" value="${escQ(child.name)}" style="width:164px" oninput="updateField('${child.id}','name',this.value)" />`;
+        const cCritBadge = cCrit ? '<span class="crit-badge">Critical</span>' : '';
+        cName.innerHTML=`<input class="cell-input" type="text" value="${escQ(child.name)}" style="width:148px" oninput="updateField('${child.id}','name',this.value)" />${cCritBadge}`;
         ctr.appendChild(cName);
 
         const cCat=document.createElement('td'); cCat.className='col-category';
@@ -915,18 +1069,89 @@ function renderRows() {
         ctr.appendChild(cE);
 
         const cD=document.createElement('td'); cD.className='col-dur';
-        cD.innerHTML=`<input class="dur-input" type="number" min="1" value="${workingDays(child.s,child.e)}" title="Working days (edit to shift end date)" onchange="updateDurationWorking('${child.id}',this.value)" />`;
+        const cs_=parseDate(child.s),ce_=parseDate(child.e);
+        const cCalDays=(cs_&&ce_&&ce_>=cs_)?diffDays(cs_,ce_)+1:0;
+        cD.innerHTML=`<input class="dur-input" type="number" min="1" value="${cCalDays}" title="Calendar days" onchange="updateDurationCalendar('${child.id}',this.value)" />`;
         ctr.appendChild(cD);
+
+        const cDep=document.createElement('td'); cDep.className='col-dep';
+        const cDepOpts=buildDepOptions(allTasks,child.id,child.dep||'');
+        cDep.innerHTML=`<select class="dep-select cell-input" onchange="updateDep('${child.id}',this.value)">${cDepOpts}</select>`;
+        ctr.appendChild(cDep);
 
         const cDel=document.createElement('td'); cDel.className='col-del';
         cDel.innerHTML=`<button class="del-btn" onclick="deleteTask('${child.id}')" title="Delete subtask">&times;</button>`;
         ctr.appendChild(cDel);
 
         const cG=document.createElement('td'); cG.className='gantt-bar-cell'; cG.colSpan=wks.length;
-        cG.appendChild(buildBar(child,wks,mn,true)); ctr.appendChild(cG);
+        cG.appendChild(buildBar(child,wks,mn,true,cCrit)); ctr.appendChild(cG);
         tbody.appendChild(ctr);
       });
     }
+  });
+
+  // Draw dependency arrows after rows are rendered
+  requestAnimationFrame(()=>drawDependencyArrows(critSet));
+}
+
+/* Build <option> list for dependency dropdown */
+function buildDepOptions(allTasks, selfId, currentDep) {
+  let opts = '<option value="">None</option>';
+  allTasks.forEach(t => {
+    if (t.id === selfId) return; // can't depend on itself
+    const sel = t.id === currentDep ? ' selected' : '';
+    const label = (t.pid ? '  \u2514 ' : '') + (t.name||'Unnamed').slice(0,28);
+    opts += `<option value="${t.id}"${sel}>${esc(label)}</option>`;
+  });
+  return opts;
+}
+
+/* ════════════════════════════════════════════════════
+   DRAW DEPENDENCY ARROWS (SVG overlay)
+════════════════════════════════════════════════════ */
+function drawDependencyArrows(critSet) {
+  const svg = g('dep-svg'); if(!svg) return;
+  svg.innerHTML = '';
+  const wrapper = g('gantt-wrapper');
+  const wRect   = wrapper.getBoundingClientRect();
+  const tasks   = getTasks();
+
+  tasks.forEach(t => {
+    if (!t.dep) return;
+    const pred = tasks.find(x => x.id === t.dep); if (!pred) return;
+
+    // Find bar elements
+    const fromBar = wrapper.querySelector(`.gantt-bar-bg[data-taskid="${pred.id}"]`);
+    const toBar   = wrapper.querySelector(`.gantt-bar-bg[data-taskid="${t.id}"]`);
+    if (!fromBar || !toBar) return;
+
+    const fR  = fromBar.getBoundingClientRect();
+    const tR  = toBar.getBoundingClientRect();
+
+    // Convert to wrapper-relative coords (account for scroll)
+    const x1 = fR.right  - wRect.left + wrapper.scrollLeft;
+    const y1 = fR.top    - wRect.top  + wrapper.scrollTop + fR.height/2;
+    const x2 = tR.left   - wRect.left + wrapper.scrollLeft;
+    const y2 = tR.top    - wRect.top  + wrapper.scrollTop + tR.height/2;
+
+    const isCrit = critSet.has(t.id) && critSet.has(pred.id);
+    const cls    = isCrit ? 'critical-dep' : '';
+
+    // Elbow path: right → down/up → left → arrowhead
+    const midX = x1 + Math.max(10, (x2-x1)*0.5);
+    const d    = `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`;
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+    path.setAttribute('d', d);
+    path.setAttribute('class','dep-line '+cls);
+    svg.appendChild(path);
+
+    // Arrowhead triangle at (x2, y2) pointing right
+    const aw=6, ah=4;
+    const arrow=document.createElementNS('http://www.w3.org/2000/svg','polygon');
+    arrow.setAttribute('points',`${x2},${y2} ${x2-aw},${y2-ah} ${x2-aw},${y2+ah}`);
+    arrow.setAttribute('class','dep-arrow '+cls);
+    svg.appendChild(arrow);
   });
 }
 
@@ -1060,7 +1285,9 @@ function exportCSV() {
     const cd=(parseDate(p.s)&&parseDate(p.e))?(diffDays(parseDate(p.s),parseDate(p.e))+1):0;
     rows.push(['Parent',p.name,p.cat,p.who,p.s,p.e,cd].map(v=>`"${String(v||'').replace(/"/g,'""')}"`).join(','));
     children(p.id).forEach(c=>{
-      rows.push(['Subtask',c.name,c.cat,c.who,c.s,c.e,workingDays(c.s,c.e)].map(v=>`"${String(v||'').replace(/"/g,'""')}"`).join(','));
+      const cs=parseDate(c.s),ce=parseDate(c.e);
+      const cd=(cs&&ce&&ce>=cs)?diffDays(cs,ce)+1:0;
+      rows.push(['Subtask',c.name,c.cat,c.who,c.s,c.e,cd].map(v=>`"${String(v||'').replace(/"/g,'""')}"`).join(','));
     });
   });
   const csv=[hdr.join(','),...rows].join('\n');
@@ -1119,6 +1346,57 @@ function exportPDF() {
 }
 
 /* ════════════════════════════════════════════════════
+   BACKUP & RESTORE
+════════════════════════════════════════════════════ */
+function backupData() {
+  const payload = {
+    version: 2,
+    exported: new Date().toISOString(),
+    houses,
+    CATS,
+    collapsed,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  const dt   = toISO(today()).replace(/-/g,'');
+  a.href = url;
+  a.download = `LOPA_Gantt_Backup_${dt}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Backup downloaded. Keep this file safe.');
+}
+
+function restoreData(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const payload = JSON.parse(e.target.result);
+      if (!payload.houses || !Array.isArray(payload.houses)) {
+        showToast('Invalid backup file.'); return;
+      }
+      houses    = payload.houses;
+      CATS      = payload.CATS      || [...DEFAULT_CATS];
+      collapsed = payload.collapsed || {};
+      activeHID = houses[0]?.id || null;
+      saveAll(); saveCats(); saveCollapsed();
+      renderTabs();
+      loadMetaIntoUI();
+      render();
+      showToast(`Restored ${houses.length} house(s) from backup.`);
+    } catch(err) {
+      showToast('Could not read backup file.');
+      console.error(err);
+    }
+    // Reset file input so same file can be re-selected
+    event.target.value = '';
+  };
+  reader.readAsText(file);
+}
+
+/* ════════════════════════════════════════════════════
    TOAST
 ════════════════════════════════════════════════════ */
 let _tt=null;
@@ -1134,6 +1412,15 @@ loadAll();
 renderTabs();
 loadMetaIntoUI();
 render();
+
+// Redraw arrows on scroll
+g('gantt-wrapper').addEventListener('scroll', ()=>{
+  requestAnimationFrame(()=>drawDependencyArrows(computeCriticalPath()));
+});
+// Redraw on window resize
+window.addEventListener('resize', ()=>{
+  requestAnimationFrame(()=>drawDependencyArrows(computeCriticalPath()));
+});
 </script>
 </body>
 </html>
