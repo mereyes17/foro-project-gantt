@@ -627,7 +627,11 @@ function endFromWorkingDays(startISO, n) {
 ════════════════════════════════════════════════════ */
 function today()        { const d=new Date(); d.setHours(0,0,0,0); return d; }
 function addDays(b,n)   { const d=new Date(b); d.setDate(d.getDate()+n); return d; }
-function toISO(d)       { return d.toISOString().slice(0,10); }
+function toISO(d)       {
+  // Use LOCAL date parts to avoid UTC offset shifting the date (e.g. UTC+8 Manila)
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${dd}`;
+}
 function parseDate(s)   { if(!s) return null; const d=new Date(s+'T00:00:00'); return isNaN(d)?null:d; }
 function diffDays(a,b)  { return Math.round((b-a)/86400000); }
 function weekStart(d)   { const c=new Date(d); c.setDate(c.getDate()-c.getDay()); c.setHours(0,0,0,0); return c; }
@@ -698,30 +702,157 @@ function saveAll() {
   localStorage.setItem(SK_HOUSES, JSON.stringify(houses));
   localStorage.setItem(SK_ACTIVE, activeHID);
 }
-function saveCollapsed() { localStorage.setItem(SK_COLLAPSED, JSON.stringify(collapsed)); }
-function saveCats()      { localStorage.setItem(SK_CATS, JSON.stringify(CATS)); }
+/* ════════════════════════════════════════════════════
+   STORAGE — IndexedDB (unlimited) with localStorage fallback
+   IndexedDB gives 50–500MB depending on browser/disk.
+   localStorage kept only as emergency fallback.
+   Existing localStorage data is migrated automatically.
+════════════════════════════════════════════════════ */
+const DB_NAME    = 'ForoGanttDB';
+const DB_VERSION = 1;
+const DB_STORE   = 'gantt';
+let   _db        = null;  // holds the open IDBDatabase
 
-function loadAll() {
-  const rh = localStorage.getItem(SK_HOUSES);
-  const ra = localStorage.getItem(SK_ACTIVE);
-  const rc = localStorage.getItem(SK_CATS);
+/* Open (or create) the IndexedDB database */
+function openDB() {
+  return new Promise((resolve, reject) => {
+    if (_db) { resolve(_db); return; }
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(DB_STORE)) {
+        db.createObjectStore(DB_STORE); // key-value store, key = record name
+      }
+    };
+    req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+/* Write a value to IndexedDB */
+function idbSet(key, value) {
+  return openDB().then(db => new Promise((resolve, reject) => {
+    const tx  = db.transaction(DB_STORE, 'readwrite');
+    const req = tx.objectStore(DB_STORE).put(value, key);
+    req.onsuccess = () => resolve();
+    req.onerror   = e => reject(e.target.error);
+  }));
+}
+
+/* Read a value from IndexedDB */
+function idbGet(key) {
+  return openDB().then(db => new Promise((resolve, reject) => {
+    const tx  = db.transaction(DB_STORE, 'readonly');
+    const req = tx.objectStore(DB_STORE).get(key);
+    req.onsuccess = e => resolve(e.target.result ?? null);
+    req.onerror   = e => reject(e.target.error);
+  }));
+}
+
+/* ── Compress/decompress tasks to save space ── */
+function compressTask(t) {
+  const o = { i:t.id, n:t.name||'', c:t.cat||'', w:t.who||'', s:t.s||'', e:t.e||'' };
+  if (t.pid) o.p = t.pid;
+  if (t.dep) o.d = t.dep;
+  return o;
+}
+function decompressTask(o) {
+  return { id:o.i||o.id||'', name:o.n||(o.name||''), cat:o.c||(o.cat||''),
+    who:o.w||(o.who||''), s:o.s||'', e:o.e||'',
+    pid:o.p||(o.pid||null), dep:o.d||(o.dep||null) };
+}
+function compressHouses(arr) {
+  return arr.map(h => ({
+    id: h.id, lb: h.label,
+    m: { n:h.meta?.name||'', l:h.meta?.location||'', o:h.meta?.owner||'', b:h.meta?.by||'', d:h.meta?.date||'' },
+    t: (h.tasks||[]).map(compressTask)
+  }));
+}
+function decompressHouses(arr) {
+  return arr.map(h => ({
+    id: h.id,
+    label: h.lb || h.label || '',
+    meta: h.m
+      ? { name:h.m.n||'', location:h.m.l||'', owner:h.m.o||'', by:h.m.b||'', date:h.m.d||'' }
+      : (h.meta || {}),
+    tasks: (h.t || h.tasks || []).map(decompressTask)
+  }));
+}
+
+/* ── Save all data to IndexedDB ── */
+async function saveAll() {
+  const data = {
+    houses:    compressHouses(houses),
+    activeHID: activeHID,
+    CATS:      CATS,
+    collapsed: collapsed,
+  };
+  try {
+    await idbSet('gantt_main', data);
+    // Also update localStorage activeHID for quick tab-restore on reload
+    try { localStorage.setItem(SK_ACTIVE, activeHID); } catch(e){}
+  } catch(e) {
+    console.warn('saveAll IDB error:', e);
+    // Fallback to localStorage (compressed)
+    try {
+      localStorage.setItem(SK_HOUSES,    JSON.stringify(compressHouses(houses)));
+      localStorage.setItem(SK_ACTIVE,    activeHID);
+      localStorage.setItem(SK_CATS,      JSON.stringify(CATS));
+      localStorage.setItem(SK_COLLAPSED, JSON.stringify(collapsed));
+    } catch(le) {
+      showToast('Storage full — please export a backup.');
+    }
+  }
+}
+
+function saveCollapsed() { saveAll(); }  // unified — everything saves together
+function saveCats()      { saveAll(); }
+
+/* ── Load all data — IDB first, migrate localStorage if needed ── */
+async function loadAll() {
+  try {
+    // Try IndexedDB first
+    const data = await idbGet('gantt_main');
+    if (data && data.houses) {
+      houses    = decompressHouses(data.houses);
+      activeHID = data.activeHID || (houses[0]?.id ?? null);
+      CATS      = data.CATS      || [...DEFAULT_CATS];
+      collapsed = data.collapsed || {};
+      return; // loaded from IDB — done
+    }
+  } catch(e) { console.warn('IDB load error:', e); }
+
+  // IDB empty — try migrating from localStorage
+  const rh   = localStorage.getItem(SK_HOUSES);
+  const ra   = localStorage.getItem(SK_ACTIVE);
+  const rc   = localStorage.getItem(SK_CATS);
   const rcol = localStorage.getItem(SK_COLLAPSED);
 
-  if(rc)  { try { CATS=JSON.parse(rc); }      catch(e){} }
-  if(rcol){ try { collapsed=JSON.parse(rcol); } catch(e){} }
+  if (rc)   { try { CATS      = JSON.parse(rc);   } catch(e){} }
+  if (rcol) { try { collapsed = JSON.parse(rcol); } catch(e){} }
 
-  if(rh) {
+  if (rh) {
     try {
-      houses = JSON.parse(rh);
+      const raw = JSON.parse(rh);
+      houses    = decompressHouses(raw);
       activeHID = ra && houses.find(h=>h.id===ra) ? ra : houses[0].id;
+      // Migrate to IDB and clear localStorage to free space
+      await saveAll();
+      try {
+        localStorage.removeItem(SK_HOUSES);
+        localStorage.removeItem(SK_CATS);
+        localStorage.removeItem(SK_COLLAPSED);
+      } catch(e){}
+      showToast('Data migrated to IndexedDB — storage limit expanded.');
       return;
-    } catch(e){}
+    } catch(e) { console.warn('localStorage migration error:', e); }
   }
-  // First time — create 8 houses
+
+  // Fresh start — create 8 default houses
   const labels = ['House 2 – Jim','House 3 – Tinay','House 4 – Rapa','House 5 – Jamike','House 6 – Joel','House 7 – Nine','House 8 – Whitey','House 9'];
-  houses = labels.map(l => makeHouse(l));
+  houses    = labels.map(l => makeHouse(l));
   activeHID = houses[0].id;
-  saveAll();
+  await saveAll();
 }
 
 /* ════════════════════════════════════════════════════
@@ -729,7 +860,7 @@ function loadAll() {
 ════════════════════════════════════════════════════ */
 function activeHouse()  { return houses.find(h=>h.id===activeHID); }
 function getTasks()     { return activeHouse()?.tasks || []; }
-function setTasks(arr)  { activeHouse().tasks = arr; saveAll(); }
+function setTasks(arr)  { activeHouse().tasks = arr; saveAll().catch(console.warn); }
 function getMeta()      { return activeHouse()?.meta || {}; }
 
 /* ════════════════════════════════════════════════════
@@ -1787,20 +1918,22 @@ function showToast(msg) {
 /* ════════════════════════════════════════════════════
    INIT
 ════════════════════════════════════════════════════ */
-loadAll();
-renderTabs();
-loadMetaIntoUI();
-loadColVis();
-render();
+(async () => {
+  await loadAll();   // IDB is async — must await before rendering
+  renderTabs();
+  loadMetaIntoUI();
+  loadColVis();
+  render();
 
-// Redraw arrows on scroll
-g('gantt-wrapper').addEventListener('scroll', ()=>{
-  requestAnimationFrame(()=>drawDependencyArrows(computeCriticalPath()));
-});
-// Redraw on window resize
-window.addEventListener('resize', ()=>{
-  requestAnimationFrame(()=>drawDependencyArrows(computeCriticalPath()));
-});
+  // Redraw arrows on scroll
+  g('gantt-wrapper').addEventListener('scroll', () => {
+    requestAnimationFrame(() => drawDependencyArrows(computeCriticalPath()));
+  });
+  // Redraw on window resize
+  window.addEventListener('resize', () => {
+    requestAnimationFrame(() => drawDependencyArrows(computeCriticalPath()));
+  });
+})();
 </script>
 </body>
 </html>
