@@ -346,12 +346,12 @@ select.cell-input { cursor: pointer; }
 .modal-close:hover { color: var(--charcoal); }
 #tmpl-modal-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
 #tmpl-modal-body label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--secondary); }
-#tmpl-modal-body select, #tmpl-modal-body input[type="text"] {
+#tmpl-modal-body select, #tmpl-modal-body input[type="text"], #tmpl-modal-body input[type="date"] {
   font-family: var(--font); font-size: 13px; color: var(--charcoal);
   border: 1px solid var(--border); border-radius: 4px; padding: 7px 10px;
   width: 100%; outline: none; margin-top: 4px;
 }
-#tmpl-modal-body select:focus, #tmpl-modal-body input[type="text"]:focus { border-color: var(--rose); }
+#tmpl-modal-body select:focus, #tmpl-modal-body input[type="text"]:focus, #tmpl-modal-body input[type="date"]:focus { border-color: var(--rose); }
 #tmpl-modal-body .hint { font-size: 11px; color: var(--secondary); line-height: 1.5; }
 #tmpl-modal-footer { padding: 12px 20px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; }
 
@@ -1374,53 +1374,86 @@ function closeTmplModal() {
   g('tmpl-modal').classList.remove('open');
 }
 function applyTemplate() {
-  const srcId      = g('tmpl-source').value;
-  const newStartISO = g('tmpl-start-date').value;
-  const src = houses.find(h => h.id === srcId);
-  if (!src || !newStartISO) { showToast('Please select a source house and a start date.'); return; }
+  try {
+    const srcSel = document.getElementById('tmpl-source');
+    const dateSel = document.getElementById('tmpl-start-date');
 
-  const srcTasks = src.tasks;
-  if (!srcTasks.length) { showToast('Source house has no tasks to copy.'); return; }
+    if (!srcSel || !dateSel) { showToast('Modal elements not found.'); return; }
 
-  // Find earliest start date in source
-  let earliest = null;
-  srcTasks.forEach(t => {
-    const d = parseDate(t.s);
-    if (d && (!earliest || d < earliest)) earliest = d;
-  });
-  if (!earliest) { showToast('Source tasks have no valid start dates.'); return; }
+    const srcId       = srcSel.value;
+    const newStartISO = dateSel.value;
 
-  const newStart = parseDate(newStartISO);
-  const shift    = diffDays(earliest, newStart);
+    if (!srcId)       { showToast('Please select a source house.'); return; }
+    if (!newStartISO) { showToast('Please enter a start date.'); return; }
 
-  // Clone tasks — remap IDs, shift dates, preserve all fields including dep
-  const idMap = {};
-  const cloned = srcTasks.map(t => {
-    const newId = uid();
-    idMap[t.id] = newId;
-    return {
-      id:   newId,
-      name: t.name,
-      cat:  t.cat,
-      who:  t.who  || '',
-      s:    toISO(addDays(parseDate(t.s), shift)),
-      e:    toISO(addDays(parseDate(t.e), shift)),
-      pid:  t.pid  || null,
-      dep:  t.dep  || null,  // ← was missing before
-    };
-  });
+    const src = houses.find(h => h.id === srcId);
+    if (!src) { showToast('Source house not found.'); return; }
 
-  // Remap parent and dependency IDs to new cloned IDs
-  cloned.forEach(t => {
-    if (t.pid) t.pid = idMap[t.pid] || null;
-    if (t.dep) t.dep = idMap[t.dep] || null;
-  });
+    const srcTasks = src.tasks || [];
+    if (!srcTasks.length) { showToast('Source house has no tasks.'); return; }
 
-  activeHouse().tasks = cloned;
-  saveAll();
-  closeTmplModal();
-  render();
-  showToast(`Copied ${cloned.length} tasks from "${src.label}" → shifted to ${fmtFull(newStart)}.`);
+    // Find earliest start date
+    let earliest = null;
+    srcTasks.forEach(t => {
+      if (!t.s) return;
+      const d = new Date(t.s + 'T00:00:00');
+      if (!isNaN(d) && (!earliest || d < earliest)) earliest = d;
+    });
+    if (!earliest) { showToast('No valid start dates in source.'); return; }
+
+    const newStart = new Date(newStartISO + 'T00:00:00');
+    if (isNaN(newStart)) { showToast('Invalid start date entered.'); return; }
+
+    const shiftMs = newStart - earliest;
+    const shiftDays = Math.round(shiftMs / 86400000);
+
+    // Clone tasks with new IDs, shifted dates, all fields preserved
+    const idMap = {};
+    const cloned = srcTasks.map(t => {
+      const newId = Math.random().toString(36).slice(2,8) + Date.now().toString(36);
+      idMap[t.id] = newId;
+      const sDate = t.s ? new Date(t.s + 'T00:00:00') : null;
+      const eDate = t.e ? new Date(t.e + 'T00:00:00') : null;
+      const newS = sDate ? new Date(sDate.getTime() + shiftDays * 86400000) : null;
+      const newE = eDate ? new Date(eDate.getTime() + shiftDays * 86400000) : null;
+      return {
+        id:   newId,
+        name: t.name  || '',
+        cat:  t.cat   || (CATS[0] || ''),
+        who:  t.who   || '',
+        s:    newS ? newS.toISOString().slice(0,10) : '',
+        e:    newE ? newE.toISOString().slice(0,10) : '',
+        pid:  t.pid   || null,
+        dep:  t.dep   || null,
+      };
+    });
+
+    // Remap pid and dep to new cloned IDs
+    cloned.forEach(t => {
+      if (t.pid && idMap[t.pid]) t.pid = idMap[t.pid];
+      else t.pid = null;
+      if (t.dep && idMap[t.dep]) t.dep = idMap[t.dep];
+      else t.dep = null;
+    });
+
+    // Apply to active house
+    const ah = activeHouse();
+    if (!ah) { showToast('No active house found.'); return; }
+    ah.tasks = cloned;
+    localStorage.setItem(SK_HOUSES, JSON.stringify(houses));
+    localStorage.setItem(SK_ACTIVE, activeHID);
+
+    // Close modal first, then render
+    document.getElementById('tmpl-overlay').classList.remove('open');
+    document.getElementById('tmpl-modal').classList.remove('open');
+
+    render();
+    showToast('Copied ' + cloned.length + ' tasks from "' + src.label + '".');
+
+  } catch(err) {
+    showToast('Copy failed: ' + err.message);
+    console.error('applyTemplate error:', err);
+  }
 }
 
 /* ════════════════════════════════════════════════════
