@@ -550,7 +550,7 @@ body.pdf-export .category-text { display: inline !important; }
 
 <!-- TEMPLATE COPY MODAL -->
 <div id="tmpl-overlay" onclick="closeTmplModal()"></div>
-<div id="tmpl-modal">
+<div id="tmpl-modal" onclick="event.stopPropagation()">
   <div id="tmpl-modal-header">
     <h3>Copy Tasks from Another House</h3>
     <button class="modal-close" onclick="closeTmplModal()">&times;</button>
@@ -568,13 +568,13 @@ body.pdf-export .category-text { display: inline !important; }
   </div>
   <div id="tmpl-modal-footer">
     <button class="btn" onclick="closeTmplModal()">Cancel</button>
-    <button class="btn primary" onclick="applyTemplate()">Copy &amp; Apply</button>
+    <button class="btn primary" onclick="event.stopPropagation();applyTemplate()">Copy &amp; Apply</button>
   </div>
 </div>
 
 <!-- CATEGORY MANAGER MODAL -->
 <div id="cat-overlay" onclick="closeCatManager()"></div>
-<div id="cat-manager">
+<div id="cat-manager" onclick="event.stopPropagation()">
   <div id="cat-manager-header">
     <h3>Manage Categories</h3>
     <button class="modal-close" onclick="closeCatManager()">&times;</button>
@@ -1352,14 +1352,20 @@ function render() { renderHeader(); renderRows(); }
    TEMPLATE COPY MODAL
 ════════════════════════════════════════════════════ */
 function openTmplModal() {
-  const sel=g('tmpl-source');
-  sel.innerHTML='';
-  houses.forEach(h=>{
-    if(h.id===activeHID) return;
-    const o=document.createElement('option'); o.value=h.id; o.textContent=h.label; sel.appendChild(o);
+  const sel = g('tmpl-source');
+  sel.innerHTML = '';
+  houses.forEach(h => {
+    if (h.id === activeHID) return;
+    const o = document.createElement('option');
+    o.value = h.id;
+    o.textContent = h.label;
+    sel.appendChild(o);
   });
-  if(!sel.options.length){ showToast('No other houses to copy from.'); return; }
-  g('tmpl-start-date').value=toISO(today());
+  if (!sel.options.length) {
+    showToast('No other houses to copy from.');
+    return;
+  }
+  g('tmpl-start-date').value = toISO(today());
   g('tmpl-overlay').classList.add('open');
   g('tmpl-modal').classList.add('open');
 }
