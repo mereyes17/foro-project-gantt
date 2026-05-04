@@ -529,7 +529,7 @@ body.pdf-export .category-text { display: inline !important; }
     <span>Hatched = Sundays &amp; PH holidays</span>
     <span style="margin-left:12px;display:flex;align-items:center;gap:5px"><span class="legend-critical"></span><span>Critical path</span></span>
     <span style="margin-left:12px;display:flex;align-items:center;gap:5px"><span class="legend-dep-line"></span><span>Dependency link</span></span>
-    <span style="margin-left:8px;font-size:10px;color:var(--secondary)">All durations = calendar days</span>
+    <span style="margin-left:8px;font-size:10px;color:var(--secondary)">Days = working days (Mon–Sat, excl. PH holidays)</span>
   </div>
 
   <!-- GANTT -->
@@ -609,7 +609,7 @@ function buildPHHolidays(yr) {
 }
 const CY = new Date().getFullYear();
 const PH_HOL = new Set([...buildPHHolidays(CY-1),...buildPHHolidays(CY),...buildPHHolidays(CY+1),...buildPHHolidays(CY+2)]);
-function isNonWorking(d) { return d.getDay()===0 || PH_HOL.has(toISO(d)); }
+function isNonWorking(d) { return d.getDay()===0 || PH_HOL.has(toISO(d)); } // Sunday=0 only; Saturday=6 is working
 function workingDays(s0, e0) {
   const s=parseDate(s0),e=parseDate(e0); if(!s||!e||e<s) return 0;
   let n=0,c=new Date(s); while(c<=e){if(!isNonWorking(c))n++; c.setDate(c.getDate()+1);} return n;
@@ -856,13 +856,8 @@ function updateField(id, field, val) {
 }
 
 function updateDurationCalendar(id, n) {
-  const tasks = getTasks();
-  const t = tasks.find(x => x.id === id); if (!t) return;
-  const days = parseInt(n); if (!days || days < 1) return;
-  const start = parseDate(t.s); if (!start) return;
-  t.e = toISO(addDays(start, days - 1));
-  if (t.pid) syncParentDates(tasks, t.pid);
-  setTasks(tasks); renderHeader(); renderRows();
+  // kept for backward compat — now also uses working days
+  updateDurationWorking(id, n);
 }
 
 function updateDurationWorking(id, n) {
@@ -882,78 +877,106 @@ function updateDep(id, depId) {
 }
 
 /* ════════════════════════════════════════════════════
-   CRITICAL PATH  (longest path to project end)
-   Uses forward-pass / backward-pass on flat task list.
-   Dependency type: Finish-to-Start only.
+   CRITICAL PATH
+   Mode A — dependency chain exists:
+     Proper CPM forward/backward pass. Tasks with
+     total float = 0 are critical.
+   Mode B — no/few dependencies:
+     A task is critical if its end date falls within
+     the last 10% of the project duration, OR it has
+     the latest end date among all tasks (ties included).
+   A parent is critical if ANY of its subtasks is critical.
 ════════════════════════════════════════════════════ */
 function computeCriticalPath() {
   const tasks = getTasks();
   if (!tasks.length) return new Set();
 
-  // Build map id -> task
-  const map = {};
-  tasks.forEach(t => { map[t.id] = t; });
-
-  // Forward pass: earliest finish
-  const ef = {}; // id -> Date (earliest finish)
-  const es = {}; // id -> Date (earliest start)
-
-  function getEF(id, visited = new Set()) {
-    if (ef[id]) return ef[id];
-    if (visited.has(id)) return parseDate(map[id]?.e) || today(); // cycle guard
-    visited.add(id);
-    const t = map[id]; if (!t) return today();
-    let start = parseDate(t.s) || today();
-    if (t.dep && map[t.dep]) {
-      const predFinish = getEF(t.dep, visited);
-      if (predFinish > start) start = predFinish;
-    }
-    es[id] = start;
-    const end = parseDate(t.e) || start;
-    const dur = Math.max(0, diffDays(parseDate(t.s) || start, end));
-    ef[id] = new Date(Math.max(start.getTime(), addDays(start, dur).getTime()));
-    return ef[id];
-  }
-  tasks.forEach(t => getEF(t.id));
-
-  // Project end = max of all EF
-  let projEnd = null;
-  tasks.forEach(t => { if (!projEnd || ef[t.id] > projEnd) projEnd = ef[t.id]; });
-
-  // Backward pass: latest finish / latest start
-  const lf = {}; // id -> Date
-  const ls = {};
-  tasks.forEach(t => { lf[t.id] = new Date(projEnd); });
-
-  // For each task, if it has dependents, its LF = min of dependents' LS
-  tasks.forEach(t => {
-    if (t.dep && lf[t.dep] !== undefined) {
-      const depTask = map[t.dep];
-      if (depTask) {
-        const tStart = es[t.id] || parseDate(t.s) || today();
-        const tEnd   = ef[t.id];
-        const tDur   = diffDays(es[t.id] || parseDate(t.s), tEnd);
-        // LF of predecessor = min(current LF of pred, LS of this task)
-        const thisLS = new Date(tStart); // approximation
-        if (thisLS < lf[t.dep]) lf[t.dep] = new Date(thisLS);
-      }
-    }
-  });
-  tasks.forEach(t => {
-    const end = lf[t.id];
-    const s   = es[t.id]  || parseDate(t.s) || today();
-    const dur = diffDays(s, ef[t.id]);
-    ls[t.id]  = addDays(end, -dur);
-  });
-
-  // Total float = LS - ES; float == 0 → critical
+  const hasDeps = tasks.some(t => t.dep);
   const critical = new Set();
+
+  if (hasDeps) {
+    // ── Mode A: proper CPM ──
+    const map = {};
+    tasks.forEach(t => { map[t.id] = t; });
+
+    // Forward pass — compute Earliest Start (ES) and Earliest Finish (EF)
+    const ES = {}, EF = {};
+    function forwardPass(id, stack = new Set()) {
+      if (id in ES) return;
+      if (stack.has(id)) return; // cycle guard
+      stack.add(id);
+      const t = map[id]; if (!t) return;
+      let es = parseDate(t.s) || today();
+      // If this task has a predecessor, ES = max(own start, predecessor EF)
+      if (t.dep && map[t.dep]) {
+        forwardPass(t.dep, stack);
+        const predEF = EF[t.dep];
+        if (predEF && predEF > es) es = new Date(predEF);
+      }
+      ES[id] = es;
+      const dur = Math.max(0, diffDays(parseDate(t.s)||es, parseDate(t.e)||es));
+      EF[id] = addDays(es, dur);
+    }
+    tasks.forEach(t => forwardPass(t.id));
+
+    // Project end = max EF across all tasks
+    let projEnd = null;
+    tasks.forEach(t => { if (!projEnd || EF[t.id] > projEnd) projEnd = EF[t.id]; });
+
+    // Backward pass — compute Latest Finish (LF) and Latest Start (LS)
+    const LF = {}, LS = {};
+    tasks.forEach(t => { LF[t.id] = new Date(projEnd); });
+
+    // For each task T that has a predecessor P: LF[P] = min(LF[P], LS[T])
+    // Process in reverse topological order (iterate several times to converge)
+    for (let pass = 0; pass < tasks.length; pass++) {
+      tasks.forEach(t => {
+        const dur = Math.max(0, diffDays(ES[t.id]||parseDate(t.s)||today(), EF[t.id]||parseDate(t.e)||today()));
+        LS[t.id] = addDays(LF[t.id], -dur);
+        if (t.dep && map[t.dep]) {
+          const predLF = LS[t.id]; // predecessor must finish by LS of this task
+          if (!LF[t.dep] || predLF < LF[t.dep]) LF[t.dep] = new Date(predLF);
+        }
+      });
+    }
+
+    // Total Float = LS - ES; float <= 0 → critical
+    tasks.forEach(t => {
+      const es = ES[t.id] || parseDate(t.s) || today();
+      const ls = LS[t.id] || es;
+      if (diffDays(es, ls) <= 0) critical.add(t.id);
+    });
+
+  } else {
+    // ── Mode B: no dependencies — mark tasks ending near project end ──
+    let projEnd = null;
+    tasks.forEach(t => {
+      const e = parseDate(t.e); if (!e) return;
+      if (!projEnd || e > projEnd) projEnd = e;
+    });
+    if (!projEnd) return critical;
+
+    let projStart = null;
+    tasks.forEach(t => {
+      const s = parseDate(t.s); if (!s) return;
+      if (!projStart || s < projStart) projStart = s;
+    });
+    const projDur = Math.max(1, diffDays(projStart, projEnd));
+    // Threshold: task end within last 10% of project span, minimum 7 days
+    const thresholdDays = Math.max(7, Math.round(projDur * 0.10));
+    const cutoff = addDays(projEnd, -thresholdDays);
+
+    tasks.forEach(t => {
+      const e = parseDate(t.e); if (!e) return;
+      if (e >= cutoff) critical.add(t.id);
+    });
+  }
+
+  // ── Propagate: parent is critical if any child is critical ──
   tasks.forEach(t => {
-    const esDate = es[t.id] || parseDate(t.s) || today();
-    const lsDate = ls[t.id] || esDate;
-    const fl = diffDays(esDate, lsDate);
-    if (fl <= 0) critical.add(t.id);
+    if (t.pid && critical.has(t.id)) critical.add(t.pid);
   });
+
   return critical;
 }
 
@@ -1076,7 +1099,7 @@ function buildBar(task, wks, mn, isSub, isCritical) {
   if(s&&e&&e>=s){
     const left=Math.max(0,diffDays(mn,s)*(PXW/7));
     const width=Math.max(6,(diffDays(s,e)+1)*(PXW/7));
-    const lblDays=diffDays(s,e)+1;
+    const lblDays = workingDays(task.s, task.e);
 
     const bg=document.createElement('div');
     bg.className='gantt-bar-bg'+(isCritical?' critical-bar':'');
@@ -1164,10 +1187,9 @@ function renderRows() {
     tr.appendChild(eTd);
 
     // Duration
-    const s_p=parseDate(parent.s),e_p=parseDate(parent.e);
-    const calDays=(s_p&&e_p&&e_p>=s_p)?diffDays(s_p,e_p)+1:0;
+    const wdParent = workingDays(parent.s, parent.e);
     const durTd=document.createElement('td'); durTd.className='col-dur';
-    durTd.innerHTML=`<input class="dur-input" type="number" min="1" value="${calDays}" title="Calendar days" onchange="updateDurationCalendar('${parent.id}',this.value)" />`;
+    durTd.innerHTML=`<input class="dur-input" type="number" min="1" value="${wdParent}" title="Working days Mon–Sat (edit to shift end date)" onchange="updateDurationWorking('${parent.id}',this.value)" />`;
     tr.appendChild(durTd);
 
     // Depends On
@@ -1233,9 +1255,8 @@ function renderRows() {
         ctr.appendChild(cE);
 
         const cD=document.createElement('td'); cD.className='col-dur';
-        const cs_=parseDate(child.s),ce_=parseDate(child.e);
-        const cCalDays=(cs_&&ce_&&ce_>=cs_)?diffDays(cs_,ce_)+1:0;
-        cD.innerHTML=`<input class="dur-input" type="number" min="1" value="${cCalDays}" title="Calendar days" onchange="updateDurationCalendar('${child.id}',this.value)" />`;
+        const wdChild = workingDays(child.s, child.e);
+        cD.innerHTML=`<input class="dur-input" type="number" min="1" value="${wdChild}" title="Working days Mon–Sat (edit to shift end date)" onchange="updateDurationWorking('${child.id}',this.value)" />`;
         ctr.appendChild(cD);
 
         const cDep=document.createElement('td'); cDep.className='col-dep';
@@ -1347,38 +1368,53 @@ function closeTmplModal() {
   g('tmpl-modal').classList.remove('open');
 }
 function applyTemplate() {
-  const srcId=g('tmpl-source').value;
-  const newStartISO=g('tmpl-start-date').value;
-  const src=houses.find(h=>h.id===srcId); if(!src||!newStartISO){ closeTmplModal(); return; }
+  const srcId      = g('tmpl-source').value;
+  const newStartISO = g('tmpl-start-date').value;
+  const src = houses.find(h => h.id === srcId);
+  if (!src || !newStartISO) { showToast('Please select a source house and a start date.'); return; }
 
-  // Find earliest start in source
-  const srcTasks=src.tasks;
-  let earliest=null;
-  srcTasks.forEach(t=>{ const d=parseDate(t.s); if(!earliest||d<earliest) earliest=d; });
-  if(!earliest){ closeTmplModal(); return; }
+  const srcTasks = src.tasks;
+  if (!srcTasks.length) { showToast('Source house has no tasks to copy.'); return; }
 
-  const newStart=parseDate(newStartISO);
-  const shift=diffDays(earliest,newStart); // days to shift
+  // Find earliest start date in source
+  let earliest = null;
+  srcTasks.forEach(t => {
+    const d = parseDate(t.s);
+    if (d && (!earliest || d < earliest)) earliest = d;
+  });
+  if (!earliest) { showToast('Source tasks have no valid start dates.'); return; }
 
-  // Clone tasks with new ids, shifted dates
-  const idMap={};
-  const cloned=srcTasks.map(t=>{
-    const newId=uid(); idMap[t.id]=newId;
+  const newStart = parseDate(newStartISO);
+  const shift    = diffDays(earliest, newStart);
+
+  // Clone tasks — remap IDs, shift dates, preserve all fields including dep
+  const idMap = {};
+  const cloned = srcTasks.map(t => {
+    const newId = uid();
+    idMap[t.id] = newId;
     return {
-      id:newId, name:t.name, cat:t.cat, who:t.who,
-      s:toISO(addDays(parseDate(t.s),shift)),
-      e:toISO(addDays(parseDate(t.e),shift)),
-      pid:t.pid||null
+      id:   newId,
+      name: t.name,
+      cat:  t.cat,
+      who:  t.who  || '',
+      s:    toISO(addDays(parseDate(t.s), shift)),
+      e:    toISO(addDays(parseDate(t.e), shift)),
+      pid:  t.pid  || null,
+      dep:  t.dep  || null,  // ← was missing before
     };
   });
-  // Remap parent IDs
-  cloned.forEach(t=>{ if(t.pid) t.pid=idMap[t.pid]||null; });
 
-  activeHouse().tasks=cloned;
+  // Remap parent and dependency IDs to new cloned IDs
+  cloned.forEach(t => {
+    if (t.pid) t.pid = idMap[t.pid] || null;
+    if (t.dep) t.dep = idMap[t.dep] || null;
+  });
+
+  activeHouse().tasks = cloned;
   saveAll();
   closeTmplModal();
   render();
-  showToast(`Tasks copied from "${src.label}" and shifted to ${fmtFull(newStart)}.`);
+  showToast(`Copied ${cloned.length} tasks from "${src.label}" → shifted to ${fmtFull(newStart)}.`);
 }
 
 /* ════════════════════════════════════════════════════
